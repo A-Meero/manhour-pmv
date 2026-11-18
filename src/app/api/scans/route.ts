@@ -13,7 +13,7 @@ import { audit } from "@/lib/audit";
 const TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const MAX_BYTES = 15 * 1024 * 1024;
 
-/** Upload a photo of a filled sheet; stores it and reads it with Claude (if configured) or Tesseract. */
+/** Upload a photo of a filled sheet; stores it and reads it with the AI providers from Settings (in priority order), else Tesseract. */
 export const POST = withUser(async (request, user) => {
   const form = await request.formData().catch(() => null);
   const file = form?.get("image");

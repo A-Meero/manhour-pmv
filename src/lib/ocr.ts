@@ -2,6 +2,8 @@ import "server-only";
 
 import { appConfig } from "@/lib/env";
 import { getSettings } from "@/lib/settings";
+import { activeProviders, type ResolvedProvider } from "@/lib/ai-providers";
+import { askProvider } from "@/lib/ai-vision";
 
 export type ExtractedRow = {
   jobCardNo: string;
@@ -22,10 +24,11 @@ export type ExtractedSheet = {
 };
 
 export type OcrResult = {
-  engine: "claude" | "tesseract";
+  /** "tesseract", or the AI provider that read the photo, e.g. "Google Gemini · gemini-2.5-flash" */
+  engine: string;
   sheet: ExtractedSheet;
   rawText: string;
-  /** Problem with the preferred engine (e.g. Claude failed and Tesseract was used instead) */
+  /** Providers that failed before one succeeded (or before Tesseract was used) */
   warning: string;
 };
 
@@ -83,42 +86,18 @@ function coerceSheet(input: unknown): ExtractedSheet {
   return sheet;
 }
 
-async function runClaude(image: Buffer, mimeType: string, apiKey: string, model: string) {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 4096,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: mimeType, data: image.toString("base64") } },
-            { type: "text", text: PROMPT },
-          ],
-        },
-      ],
-    }),
-    signal: AbortSignal.timeout(90_000),
-  });
-
-  const payload = (await response.json().catch(() => null)) as {
-    content?: { type: string; text?: string }[];
-    error?: { message?: string };
-  } | null;
-  if (!response.ok) {
-    throw new Error(payload?.error?.message || `Claude API returned HTTP ${response.status}`);
-  }
-  const text = (payload?.content ?? []).filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
+async function runAi(provider: ResolvedProvider, image: Buffer, mimeType: string) {
+  const text = await askProvider(provider, { prompt: PROMPT, image: { data: image, mimeType }, maxTokens: 8192 });
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  if (start < 0 || end < start) throw new Error("Claude did not return readable data for this photo.");
-  return { sheet: coerceSheet(JSON.parse(text.slice(start, end + 1))), rawText: text };
+  if (start < 0 || end < start) throw new Error("the answer did not contain readable data");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    throw new Error("the answer was not valid JSON");
+  }
+  return { sheet: coerceSheet(parsed), rawText: text };
 }
 
 const DATE_RE = /(\d{1,2}\s*[/.\-]\s*\d{1,2}\s*[/.\-]\s*\d{2,4})/g;
@@ -172,18 +151,23 @@ async function runTesseract(image: Buffer, language: string) {
   }
 }
 
-/** Uses Claude when an API key is configured in Settings, otherwise (or if Claude fails) Tesseract. */
+/**
+ * Tries the enabled AI providers from Settings in priority order. If one fails, times out or returns
+ * unreadable output, the next one is tried. Tesseract (offline) is the last fallback.
+ */
 export async function extractSheet(image: Buffer, mimeType: string): Promise<OcrResult> {
-  const settings = await getSettings();
-  let warning = "";
-  if (settings.claudeApiKey) {
+  const [settings, providers] = await Promise.all([getSettings(), activeProviders()]);
+  const failures: string[] = [];
+  for (const provider of providers) {
     try {
-      const result = await runClaude(image, mimeType, settings.claudeApiKey, settings.claudeModel);
-      return { engine: "claude", warning, ...result };
+      const result = await runAi(provider, image, mimeType);
+      const warning = failures.length ? `${failures.join(" ")} ${provider.name} was used instead.` : "";
+      return { engine: `${provider.name} · ${provider.model}`, warning, ...result };
     } catch (error) {
-      warning = `Claude API could not read the photo (${error instanceof Error ? error.message : "unknown error"}). Tesseract was used instead.`;
+      failures.push(`${provider.name} could not read the photo (${error instanceof Error ? error.message : "unknown error"}).`);
     }
   }
   const result = await runTesseract(image, settings.tesseractLanguage);
+  const warning = failures.length ? `${failures.join(" ")} Tesseract was used instead.` : "";
   return { engine: "tesseract", warning, ...result };
 }

@@ -2,13 +2,15 @@ import { prisma } from "@/lib/prisma";
 import { requirePage } from "@/lib/auth/guards";
 import { canManageMasterData } from "@/lib/auth/access";
 import { getSettings } from "@/lib/settings";
+import { loadProviders, toPublic } from "@/lib/ai-providers";
 import { SettingsTabs } from "@/components/settings-tabs";
 import { PageHeader } from "@/components/ui";
 
 export default async function SettingsPage() {
   await requirePage(canManageMasterData);
-  const [settings, fields, keys] = await Promise.all([
+  const [settings, providers, fields, keys] = await Promise.all([
     getSettings(),
+    loadProviders(),
     prisma.fieldDefinition.findMany({ orderBy: [{ entity: "asc" }, { sortOrder: "asc" }] }),
     prisma.apiKey.findMany({ orderBy: { createdAt: "desc" }, include: { createdBy: { select: { name: true } } } }),
   ]);
@@ -22,9 +24,7 @@ export default async function SettingsPage() {
           weekStartDay: String(settings.weekStartDay),
         }}
         ocr={{
-          hasClaudeKey: !!settings.claudeApiKey,
-          claudeKeyHint: settings.claudeApiKey ? `…${settings.claudeApiKey.slice(-4)}` : "",
-          claudeModel: settings.claudeModel,
+          providers: providers.map(toPublic),
           tesseractLanguage: settings.tesseractLanguage,
         }}
         fields={fields.map((field) => ({

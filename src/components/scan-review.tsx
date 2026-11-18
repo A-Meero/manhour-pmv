@@ -93,7 +93,7 @@ export function ScanReview({
             <img src={imageUrl} alt="Photographed sheet" className="max-h-[75vh] w-full object-contain" />
           </a>
           <div className="flex items-center justify-between border-t border-gray-200 px-3 py-2 text-xs text-gray-500">
-            <span>Read with: {engine === "claude" ? "Claude" : engine === "tesseract" ? "Tesseract (offline)" : "—"}</span>
+            <span>Read with: {engine === "tesseract" ? "Tesseract (offline)" : engine === "claude" ? "Claude" : engine || "—"}</span>
             <a href={imageUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand">
               Full size <ExternalLink className="h-3 w-3" />
             </a>

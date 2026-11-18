@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, Copy, Plus, Trash2 } from "lucide-react";
 import { api, errorMessage } from "@/lib/client";
 import { Alert, Modal } from "@/components/ui";
+import { DEFAULT_TIMEOUT_SECONDS, PROVIDER_INFO, PROVIDER_TYPES, type ProviderType, type PublicProvider } from "@/lib/ai-provider-info";
 
 type Field = {
   id: string;
@@ -41,7 +42,7 @@ const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", 
 
 export function SettingsTabs(props: {
   general: { dailyHourLimit: string; weeklyHourLimit: string; weekStartDay: string };
-  ocr: { hasClaudeKey: boolean; claudeKeyHint: string; claudeModel: string; tesseractLanguage: string };
+  ocr: { providers: PublicProvider[]; tesseractLanguage: string };
   fields: Field[];
   apiKeys: ApiKeyRow[];
 }) {
@@ -123,77 +124,293 @@ function GeneralSettings({ initial }: { initial: { dailyHourLimit: string; weekl
   );
 }
 
-function OcrSettings({ initial }: { initial: { hasClaudeKey: boolean; claudeKeyHint: string; claudeModel: string; tesseractLanguage: string } }) {
-  const [apiKey, setApiKey] = useState("");
-  const [model, setModel] = useState(initial.claudeModel);
+type ProviderDraft = {
+  id?: string;
+  type: ProviderType;
+  name: string;
+  enabled: boolean;
+  model: string;
+  baseUrl: string;
+  timeoutSeconds: number;
+  apiKey?: string;
+  clearKey?: boolean;
+};
+
+const toDraft = (p: PublicProvider): ProviderDraft => ({
+  id: p.id,
+  type: p.type,
+  name: p.name,
+  enabled: p.enabled,
+  model: p.model,
+  baseUrl: p.baseUrl,
+  timeoutSeconds: p.timeoutSeconds,
+});
+
+function OcrSettings({ initial }: { initial: { providers: PublicProvider[]; tesseractLanguage: string } }) {
+  const [providers, setProviders] = useState(initial.providers);
+  const [editing, setEditing] = useState<{ index: number | null; draft: ProviderDraft } | null>(null);
+  const [testing, setTesting] = useState("");
   const [language, setLanguage] = useState(initial.tesseractLanguage);
   const { busy, message, run, setMessage } = useSaver();
 
-  async function test() {
+  /** Saves the whole list (its order is the priority order). */
+  async function saveList(list: ProviderDraft[], success: string) {
+    await run(async () => {
+      const result = await api<{ providers: PublicProvider[] }>("/api/settings/ai-providers", { method: "PUT", body: { providers: list } });
+      setProviders(result.providers);
+    }, success);
+  }
+
+  const drafts = () => providers.map(toDraft);
+
+  function move(index: number, delta: number) {
+    const list = drafts();
+    const target = index + delta;
+    if (target < 0 || target >= list.length) return;
+    [list[index], list[target]] = [list[target], list[index]];
+    saveList(list, "Order saved.");
+  }
+
+  function toggle(index: number) {
+    const list = drafts();
+    list[index] = { ...list[index], enabled: !list[index].enabled };
+    saveList(list, list[index].enabled ? `${list[index].name} enabled.` : `${list[index].name} disabled.`);
+  }
+
+  function remove(index: number) {
+    const provider = providers[index];
+    if (!confirm(`Delete "${provider.name}"? Its saved API key is deleted too.`)) return;
+    saveList(drafts().filter((_, i) => i !== index), "Provider deleted.");
+  }
+
+  async function test(provider: PublicProvider) {
     setMessage(null);
+    setTesting(provider.id);
     try {
-      const result = await api<{ message: string }>("/api/settings/test-claude", { method: "POST" });
+      const result = await api<{ message: string }>("/api/settings/ai-providers/test", { body: { id: provider.id } });
       setMessage({ kind: "success", text: result.message });
     } catch (err) {
       setMessage({ kind: "error", text: errorMessage(err) });
+    } finally {
+      setTesting("");
     }
   }
 
+  const enabledCount = providers.filter((p) => p.enabled).length;
+  let order = 0;
+
   return (
-    <div className="card max-w-2xl space-y-4 p-5">
+    <div className="max-w-4xl space-y-5">
       <Alert kind="info">
-        Photos of handwritten sheets are read with the <b>Claude API</b> when a key is saved here. Without a key (or if Claude cannot be reached) the built-in <b>Tesseract</b> reader is used; it works offline but often misreads handwriting. Users always review the rows before saving.
+        Photos of handwritten cards are read by the <b>enabled AI providers in the order below</b>. If the first one fails, times out or returns something unreadable, the next one is tried. The built-in <b>Tesseract</b> reader (offline, weak on handwriting) is always the last fallback. Users always review the rows before saving. The server needs internet access to reach online providers.
       </Alert>
-      <div>
-        <label className="label">Claude API key</label>
-        <input
-          className="input font-mono"
-          type="password"
-          autoComplete="off"
-          value={apiKey}
-          placeholder={initial.hasClaudeKey ? `Saved (${initial.claudeKeyHint}) — type a new key to replace it` : "sk-ant-…"}
-          onChange={(e) => setApiKey(e.target.value)}
-        />
-        <p className="mt-1 text-xs text-gray-500">Create a key at console.anthropic.com. The server needs internet access to use it.</p>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <label className="label">Claude model</label>
-          <input className="input font-mono" value={model} onChange={(e) => setModel(e.target.value)} />
+      {message && <Alert kind={message.kind}>{message.text}</Alert>}
+      {enabledCount === 0 && <Alert kind="warning">No AI provider is enabled, so photos are read with Tesseract only.</Alert>}
+
+      <div className="card p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-semibold">AI providers</h3>
+          <button
+            className="btn btn-sm"
+            disabled={busy}
+            onClick={() =>
+              setEditing({
+                index: null,
+                draft: { type: "openai", name: "", enabled: false, model: "", baseUrl: "", timeoutSeconds: DEFAULT_TIMEOUT_SECONDS },
+              })
+            }
+          >
+            <Plus className="h-3.5 w-3.5" /> Add provider
+          </button>
         </div>
-        <div>
+        {providers.length === 0 ? (
+          <p className="text-sm text-gray-500">No providers. Add one to read photos with AI.</p>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Priority</th>
+                  <th>Provider</th>
+                  <th>Model</th>
+                  <th>API key</th>
+                  <th>Status</th>
+                  <th className="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {providers.map((provider, index) => {
+                  if (provider.enabled) order += 1;
+                  return (
+                    <tr key={provider.id}>
+                      <td>
+                        <div className="flex items-center gap-1">
+                          <button className="btn btn-sm" disabled={busy || index === 0} onClick={() => move(index, -1)} aria-label="Move up">
+                            <ArrowUp className="h-3 w-3" />
+                          </button>
+                          <button className="btn btn-sm" disabled={busy || index === providers.length - 1} onClick={() => move(index, 1)} aria-label="Move down">
+                            <ArrowDown className="h-3 w-3" />
+                          </button>
+                          <span className="ml-1 text-xs text-gray-500">{provider.enabled ? `#${order}` : "–"}</span>
+                        </div>
+                      </td>
+                      <td>
+                        {provider.name}
+                        <div className="text-xs text-gray-500">{PROVIDER_INFO[provider.type].label}</div>
+                      </td>
+                      <td className="font-mono text-xs">{provider.model || <span className="text-gray-400">not set</span>}</td>
+                      <td className="text-xs">
+                        {provider.keyError ? (
+                          <span className="text-red-700">{provider.keyError}</span>
+                        ) : provider.hasKey ? (
+                          <span className="font-mono">Saved {provider.keyHint}</span>
+                        ) : PROVIDER_INFO[provider.type].keyRequired ? (
+                          <span className="text-gray-400">none</span>
+                        ) : (
+                          <span className="text-gray-400">none (optional)</span>
+                        )}
+                      </td>
+                      <td>{provider.enabled ? "Enabled" : "Disabled"}</td>
+                      <td>
+                        <div className="flex justify-end gap-1">
+                          <button className="btn btn-sm" disabled={busy} onClick={() => toggle(index)}>
+                            {provider.enabled ? "Disable" : "Enable"}
+                          </button>
+                          <button className="btn btn-sm" disabled={busy || testing === provider.id} onClick={() => test(provider)}>
+                            {testing === provider.id ? "Testing…" : "Test"}
+                          </button>
+                          <button className="btn btn-sm" disabled={busy} onClick={() => setEditing({ index, draft: toDraft(provider) })}>
+                            Edit
+                          </button>
+                          <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => remove(index)} aria-label="Delete">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card space-y-3 p-4">
+        <h3 className="font-semibold">Tesseract (offline fallback)</h3>
+        <div className="max-w-xs">
           <label className="label">Tesseract language</label>
           <input className="input font-mono" value={language} onChange={(e) => setLanguage(e.target.value)} />
         </div>
-      </div>
-      {message && <Alert kind={message.kind}>{message.text}</Alert>}
-      <div className="flex flex-wrap gap-2">
-        <button
-          className="btn btn-primary"
-          disabled={busy}
-          onClick={() =>
-            run(async () => {
-              await api("/api/settings", { method: "PUT", body: { claudeApiKey: apiKey, claudeModel: model, tesseractLanguage: language } });
-              setApiKey("");
-            }, "Saved.")
-          }
-        >
+        <button className="btn" disabled={busy} onClick={() => run(() => api("/api/settings", { method: "PUT", body: { tesseractLanguage: language } }), "Saved.")}>
           Save
         </button>
-        {initial.hasClaudeKey && (
-          <>
-            <button className="btn" onClick={test}>Test connection</button>
-            <button
-              className="btn btn-danger"
-              disabled={busy}
-              onClick={() => confirm("Remove the Claude API key? Photos will be read with Tesseract.") && run(() => api("/api/settings", { method: "PUT", body: { clearClaudeApiKey: true } }), "Key removed. Tesseract will be used.")}
-            >
-              Remove key
-            </button>
-          </>
-        )}
       </div>
+
+      {editing && (
+        <ProviderForm
+          draft={editing.draft}
+          saved={editing.index === null ? null : providers[editing.index]}
+          busy={busy}
+          onClose={() => setEditing(null)}
+          onSave={async (draft) => {
+            const list = drafts();
+            if (editing.index === null) list.push(draft);
+            else list[editing.index] = draft;
+            await saveList(list, `${draft.name || PROVIDER_INFO[draft.type].label} saved.`);
+            setEditing(null);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function ProviderForm({
+  draft: initialDraft,
+  saved,
+  busy,
+  onClose,
+  onSave,
+}: {
+  draft: ProviderDraft;
+  saved: PublicProvider | null;
+  busy: boolean;
+  onClose: () => void;
+  onSave: (draft: ProviderDraft) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<ProviderDraft>({ ...initialDraft, apiKey: "", clearKey: false });
+  const info = PROVIDER_INFO[draft.type];
+  const set = (patch: Partial<ProviderDraft>) => setDraft((current) => ({ ...current, ...patch }));
+
+  return (
+    <Modal title={saved ? `Edit ${saved.name}` : "Add AI provider"} onClose={onClose}>
+      <div className="space-y-3">
+        <div>
+          <label className="label">Provider type</label>
+          <select className="input" value={draft.type} disabled={!!saved} onChange={(e) => set({ type: e.target.value as ProviderType })}>
+            {PROVIDER_TYPES.map((type) => (
+              <option key={type} value={type}>{PROVIDER_INFO[type].label}</option>
+            ))}
+          </select>
+          {saved && <p className="mt-1 text-xs text-gray-500">The type cannot be changed. Add a new provider instead.</p>}
+        </div>
+        <div>
+          <label className="label">Display name</label>
+          <input className="input" value={draft.name} placeholder={info.label} onChange={(e) => set({ name: e.target.value })} />
+          <p className="mt-1 text-xs text-gray-500">Shown on the review screen, e.g. &quot;DeepSeek&quot; or &quot;Local Ollama&quot;.</p>
+        </div>
+        <div>
+          <label className="label">Model name *</label>
+          <input className="input font-mono" value={draft.model} placeholder={info.modelHint} onChange={(e) => set({ model: e.target.value })} />
+          <p className="mt-1 text-xs text-gray-500">Type it exactly as the provider names it. It must accept images.</p>
+        </div>
+        <div>
+          <label className="label">API key{info.keyRequired ? " *" : ""}</label>
+          <input
+            className="input font-mono"
+            type="password"
+            autoComplete="off"
+            value={draft.apiKey ?? ""}
+            disabled={draft.clearKey}
+            placeholder={saved?.hasKey ? `Saved (${saved.keyHint || "unreadable"}) — type a new key to replace it` : ""}
+            onChange={(e) => set({ apiKey: e.target.value })}
+          />
+          <p className="mt-1 text-xs text-gray-500">{info.keyHint}. Keys are stored encrypted and never shown again.</p>
+          {saved?.hasKey && (
+            <label className="mt-2 flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={!!draft.clearKey} onChange={(e) => set({ clearKey: e.target.checked, apiKey: "" })} /> Remove the saved key
+            </label>
+          )}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[1fr_8rem]">
+          <div>
+            <label className="label">Base URL</label>
+            <input className="input font-mono text-xs" value={draft.baseUrl} placeholder={info.defaultBaseUrl} onChange={(e) => set({ baseUrl: e.target.value })} />
+            <p className="mt-1 text-xs text-gray-500">
+              {draft.type === "openai"
+                ? "The address ending in /v1, e.g. https://api.deepseek.com/v1 or http://localhost:11434/v1 (Ollama). Leave empty for OpenAI."
+                : draft.type === "qwen"
+                  ? "Leave empty for the international endpoint. Mainland China accounts: https://dashscope.aliyuncs.com/compatible-mode/v1"
+                  : "Leave empty to use the default."}
+            </p>
+          </div>
+          <div>
+            <label className="label">Timeout (s)</label>
+            <input className="input" type="number" min={5} max={600} value={draft.timeoutSeconds} onChange={(e) => set({ timeoutSeconds: Number(e.target.value) })} />
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={draft.enabled} onChange={(e) => set({ enabled: e.target.checked })} /> Enabled
+        </label>
+        <div className="flex justify-end gap-2">
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={busy || !draft.model.trim()} onClick={() => onSave(draft)}>
+            Save
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

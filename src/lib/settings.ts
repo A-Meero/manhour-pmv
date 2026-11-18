@@ -2,16 +2,13 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 
-export const DEFAULT_CLAUDE_MODEL = "claude-sonnet-5-5";
-
 export type AppSettings = {
   /** null = no limit */
   dailyHourLimit: number | null;
   weeklyHourLimit: number | null;
   /** 0=Sunday … 6=Saturday */
   weekStartDay: number;
-  claudeApiKey: string;
-  claudeModel: string;
+  /** AI providers for photo reading are stored separately: see src/lib/ai-providers.ts */
   /** Tesseract language code(s), e.g. "eng" */
   tesseractLanguage: string;
 };
@@ -20,8 +17,6 @@ const DEFAULTS: Record<keyof AppSettings, string> = {
   dailyHourLimit: "",
   weeklyHourLimit: "",
   weekStartDay: "6",
-  claudeApiKey: "",
-  claudeModel: DEFAULT_CLAUDE_MODEL,
   tesseractLanguage: "eng",
 };
 
@@ -40,8 +35,6 @@ export async function getSettings(): Promise<AppSettings> {
     dailyHourLimit: toLimit(map.dailyHourLimit),
     weeklyHourLimit: toLimit(map.weeklyHourLimit),
     weekStartDay: Number.isInteger(weekStartDay) && weekStartDay >= 0 && weekStartDay <= 6 ? weekStartDay : 6,
-    claudeApiKey: map.claudeApiKey,
-    claudeModel: map.claudeModel || DEFAULT_CLAUDE_MODEL,
     tesseractLanguage: map.tesseractLanguage || "eng",
   };
 }

@@ -3,20 +3,20 @@ import { Printer } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requirePage } from "@/lib/auth/guards";
 import { canEnterRecords, isAdmin } from "@/lib/auth/access";
-import { getSettings } from "@/lib/settings";
+import { activeProviders } from "@/lib/ai-providers";
 import { PageHeader, Alert } from "@/components/ui";
 import { ScanUpload } from "@/components/scan-upload";
 
 export default async function ScanPage() {
   const user = await requirePage(canEnterRecords);
-  const [pending, settings] = await Promise.all([
+  const [pending, providers] = await Promise.all([
     prisma.scanSheet.findMany({
       where: { status: "PENDING_REVIEW", ...(isAdmin(user) ? {} : { uploadedById: user.id }) },
       orderBy: { createdAt: "desc" },
       take: 50,
       include: { uploadedBy: { select: { name: true } } },
     }),
-    getSettings(),
+    activeProviders(),
   ]);
 
   return (
@@ -31,13 +31,13 @@ export default async function ScanPage() {
         }
       />
       <div className="space-y-5">
-        {!settings.claudeApiKey && (
+        {providers.length === 0 && (
           <Alert kind="warning">
             Photos are read with the offline reader (Tesseract), which often misreads handwriting. Please check every line carefully.
             {isAdmin(user) && (
               <>
                 {" "}
-                Add a Claude API key in <Link href="/settings" className="underline">Settings</Link> for much better results.
+                Set up an AI provider (Claude, Gemini, Qwen…) in <Link href="/settings" className="underline">Settings › Photo reading</Link> for much better results.
               </>
             )}
           </Alert>

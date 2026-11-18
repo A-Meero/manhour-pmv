@@ -47,9 +47,25 @@ For later schema changes, run `npx prisma migrate deploy` on the server.
 1. **New Entry**: a form shaped like the paper sheet, with one employee and as many job card lines as needed.
 2. **Import Records**: an Excel template (one row per employee + job card, with start and end dates). Download the template from the page.
 3. **Scan Sheet**: print the PDF sheet (blank, or pre-filled for one employee from the Employees page). After it's filled in by hand, take a photo with the phone.
-   - If a **Claude API key** is saved in Settings › Photo reading, Claude reads the handwriting. This needs internet on the server.
-   - Otherwise the photo is read with **Tesseract**, which works offline but is much weaker on handwriting.
+   - The photo is read by the **AI providers** set up in Settings › Photo reading, in priority order (see below). This needs internet on the server, except for a local model.
+   - If no provider is enabled, or all of them fail, the photo is read with **Tesseract**, which works offline but is much weaker on handwriting.
    - The user always reviews the rows next to the photo before saving. The photo stays linked to the saved records.
+
+### AI providers for photo reading
+In **Settings › Photo reading**, admins can add these providers:
+
+| Type | Default base URL | Example model |
+|---|---|---|
+| Claude (Anthropic) | `https://api.anthropic.com` | `claude-sonnet-5-5` |
+| Google Gemini | `https://generativelanguage.googleapis.com` | `gemini-2.5-flash` |
+| Qwen (Alibaba Cloud, DashScope) | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `qwen-vl-max` |
+| OpenAI-compatible (OpenAI, DeepSeek, local Ollama / LM Studio, …) | `https://api.openai.com/v1` | `gpt-4o-mini`, or a local vision model |
+
+- Each provider has one API key, a model name (typed by the admin, and it must accept images), an optional base URL and a timeout.
+- **Test** sends a tiny request to check the key, model and address.
+- Providers are tried **top to bottom**. If one fails, times out or returns unreadable output, the next enabled one is tried, and Tesseract is the last fallback. The review screen shows which provider read the card, and a warning lists any that failed.
+- The API keys are stored encrypted with `AUTH_SECRET`. If you change `AUTH_SECRET`, enter the keys again.
+- An existing Claude key from an earlier version is moved into the list automatically.
 
 ### Tesseract fully offline (optional)
 By default Tesseract downloads its English language file the first time it's used. To avoid that, download `eng.traineddata` from https://github.com/tesseract-ocr/tessdata_fast. Put it in a folder such as `C:\manhour\tessdata` and set `TESSDATA_DIR` to that folder in `.env`.
@@ -87,7 +103,8 @@ The standard sheet fields are fixed and always present.
 - `prisma/schema.prisma`: the database model
 - `src/lib/records.ts`: record validation (duplicates, permissions, hour limits)
 - `src/lib/masterdata.ts`: job card and employee imports
-- `src/lib/ocr.ts`: photo reading (Claude / Tesseract)
+- `src/lib/ocr.ts`: photo reading (AI providers in priority order, then Tesseract)
+- `src/lib/ai-providers.ts`, `src/lib/ai-vision.ts`: AI provider settings (encrypted keys) and the API calls for each provider type
 - `src/lib/pdf-template.ts`: the printable sheet
 - `src/lib/excel.ts`: Excel templates, parsing and exports
 - Photos are stored in `UPLOAD_DIR/scans/<yyyy-mm>/`

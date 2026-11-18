@@ -8,9 +8,6 @@ type Body = {
   dailyHourLimit?: string;
   weeklyHourLimit?: string;
   weekStartDay?: string;
-  claudeApiKey?: string;
-  clearClaudeApiKey?: boolean;
-  claudeModel?: string;
   tesseractLanguage?: string;
 };
 
@@ -35,14 +32,8 @@ export const PUT = withUser(async (request, user) => {
     if (!Number.isInteger(day) || day < 0 || day > 6) throw new HttpError(400, "Invalid week start day.");
     values.weekStartDay = String(day);
   }
-  if (body.clearClaudeApiKey) values.claudeApiKey = "";
-  else if (body.claudeApiKey && body.claudeApiKey.trim()) values.claudeApiKey = body.claudeApiKey.trim();
-  if (body.claudeModel !== undefined) values.claudeModel = body.claudeModel.trim();
   if (body.tesseractLanguage !== undefined) values.tesseractLanguage = body.tesseractLanguage.trim() || "eng";
   await saveSettings(values);
-  await audit(user.id, "SETTINGS_UPDATED", "Setting", "", {
-    ...values,
-    ...(values.claudeApiKey !== undefined ? { claudeApiKey: values.claudeApiKey ? "(set)" : "(cleared)" } : {}),
-  });
+  await audit(user.id, "SETTINGS_UPDATED", "Setting", "", values);
   return NextResponse.json({ ok: true });
 }, canManageMasterData);
