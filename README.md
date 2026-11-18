@@ -16,8 +16,8 @@ It uses the same stack as PMV Workflow: Next.js 16.3, React 19.2, TypeScript, Pr
    ```
    `db:seed` creates the first admin. Then remove `ADMIN_PASSWORD` from `.env`.
 4. Run the app:
-   - Development: `npm run dev`, then open http://localhost:3001
-   - Production: `npm run build`, then `npm start` (port 3001, so it doesn't clash with PMV on 3000)
+   - Development: `npm run dev`, then open http://localhost:3002
+   - Production: `npm run build`, then `npm start` (port 3002, so it doesn't clash with PMV on 3000)
 
 For later schema changes, run `npx prisma migrate deploy` on the server.
 
