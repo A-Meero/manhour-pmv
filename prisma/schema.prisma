@@ -1,0 +1,245 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum DataSource {
+  MANUAL
+  EXCEL
+  API
+  PHOTO
+}
+
+enum FieldEntity {
+  JOB_CARD
+  EMPLOYEE
+  RECORD
+}
+
+enum FieldType {
+  TEXT
+  NUMBER
+  DATE
+  SELECT
+  CHECKBOX
+}
+
+enum ImportKind {
+  JOB_CARDS
+  EMPLOYEES
+  RECORDS
+}
+
+enum ScanStatus {
+  PENDING_REVIEW
+  SAVED
+  DISCARDED
+}
+
+model User {
+  id                 String   @id @default(cuid())
+  name               String
+  email              String   @unique
+  passwordHash       String
+  role               UserRole
+  active             Boolean  @default(true)
+  /// Employee record this login belongs to (used by EMPLOYEE users)
+  employeeId         String?  @unique
+  employee           Employee? @relation("UserEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+  /// Employee users marked with this flag may enter their own man-hour records
+  canEnterOwnRecords Boolean  @default(false)
+  sessionVersion     Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  supervising     EmployeeSupervisor[]
+  recordsCreated  ManHourRecord[]      @relation("RecordCreatedBy")
+  recordsUpdated  ManHourRecord[]      @relation("RecordUpdatedBy")
+  scans           ScanSheet[]
+  importBatches   ImportBatch[]
+  auditLogs       AuditLog[]
+  apiKeysCreated  ApiKey[]
+}
+
+model Employee {
+  id           String     @id @default(cuid())
+  fileNo       String     @unique
+  name         String
+  jobTitle     String     @default("")
+  active       Boolean    @default(true)
+  customFields Json       @default("{}")
+  source       DataSource @default(MANUAL)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  user        User?                @relation("UserEmployee")
+  supervisors EmployeeSupervisor[]
+  records     ManHourRecord[]
+
+  @@index([name])
+}
+
+model EmployeeSupervisor {
+  employeeId   String
+  supervisorId String
+  createdAt    DateTime @default(now())
+
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  supervisor User     @relation(fields: [supervisorId], references: [id], onDelete: Cascade)
+
+  @@id([employeeId, supervisorId])
+  @@index([supervisorId])
+}
+
+model JobCard {
+  id           String     @id @default(cuid())
+  code         String     @unique
+  active       Boolean    @default(true)
+  customFields Json       @default("{}")
+  source       DataSource @default(MANUAL)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  records ManHourRecord[]
+}
+
+model ManHourRecord {
+  id             String     @id @default(cuid())
+  employeeId     String
+  jobCardId      String
+  startDate      DateTime   @db.Date
+  endDate        DateTime   @db.Date
+  hours          Decimal    @db.Decimal(10, 2)
+  remarks        String     @default("")
+  customFields   Json       @default("{}")
+  /// Snapshots taken from the employee at entry time (template header fields)
+  employeeName   String     @default("")
+  jobTitle       String     @default("")
+  supervisorName String     @default("")
+  /// "Prepared By" / "Approved By" from the sheet (names only)
+  preparedByName String     @default("")
+  preparedByDate DateTime?  @db.Date
+  approvedByName String     @default("")
+  approvedByDate DateTime?  @db.Date
+  source         DataSource @default(MANUAL)
+  scanId         String?
+  importBatchId  String?
+  createdById    String?
+  updatedById    String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  employee    Employee     @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  jobCard     JobCard      @relation(fields: [jobCardId], references: [id], onDelete: Restrict)
+  scan        ScanSheet?   @relation(fields: [scanId], references: [id], onDelete: SetNull)
+  importBatch ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  createdBy   User?        @relation("RecordCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy   User?        @relation("RecordUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  /// A job card can be recorded only once per employee (closed after submission)
+  @@unique([employeeId, jobCardId])
+  @@index([startDate])
+  @@index([endDate])
+  @@index([jobCardId])
+}
+
+model FieldDefinition {
+  id        String      @id @default(cuid())
+  entity    FieldEntity
+  key       String
+  label     String
+  type      FieldType   @default(TEXT)
+  required  Boolean     @default(false)
+  options   String[]    @default([])
+  sortOrder Int         @default(0)
+  active    Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([entity, key])
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model ScanSheet {
+  id           String     @id @default(cuid())
+  filePath     String
+  mimeType     String
+  ocrEngine    String     @default("")
+  ocrError     String     @default("")
+  rawText      String     @default("")
+  extracted    Json       @default("{}")
+  status       ScanStatus @default(PENDING_REVIEW)
+  uploadedById String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  uploadedBy User?           @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  records    ManHourRecord[]
+}
+
+model ImportBatch {
+  id          String     @id @default(cuid())
+  kind        ImportKind
+  source      DataSource
+  fileName    String     @default("")
+  totalRows   Int        @default(0)
+  created     Int        @default(0)
+  skipped     Int        @default(0)
+  failed      Int        @default(0)
+  /// [{ row, value, reason }]
+  issues      Json       @default("[]")
+  createdById String?
+  apiKeyId    String?
+  createdAt   DateTime   @default(now())
+
+  createdBy User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  apiKey    ApiKey?         @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  records   ManHourRecord[]
+
+  @@index([createdAt])
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  name        String
+  prefix      String
+  keyHash     String    @unique
+  /// e.g. ["JOB_CARDS", "EMPLOYEES"]
+  scopes      String[]  @default([])
+  active      Boolean   @default(true)
+  lastUsedAt  DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  createdBy     User?         @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  importBatches ImportBatch[]
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entity     String
+  entityId   String   @default("")
+  details    Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
