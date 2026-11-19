@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { requirePage } from "@/lib/auth/guards";
-import { canEnterRecords, isAdmin } from "@/lib/auth/access";
+import { requireMethodPage } from "@/lib/auth/guards";
+import { isAdmin } from "@/lib/auth/access";
 import { getEntryData } from "@/lib/entry-data";
 import { normalizeCode } from "@/lib/masterdata";
 import { PageHeader } from "@/components/ui";
@@ -9,7 +9,7 @@ import { ScanReview } from "@/components/scan-review";
 import type { ExtractedSheet } from "@/lib/ocr";
 
 export default async function ScanReviewPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requirePage(canEnterRecords);
+  const user = await requireMethodPage("photo");
   const { id } = await params;
   const scan = await prisma.scanSheet.findUnique({ where: { id }, include: { _count: { select: { records: true } } } });
   if (!scan) notFound();

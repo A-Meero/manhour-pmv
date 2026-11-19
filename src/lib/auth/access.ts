@@ -1,4 +1,5 @@
 import type { CurrentUser } from "@/lib/auth/session";
+import type { LoggingMethod } from "@/lib/logging-methods";
 
 /** "ALL" = no restriction, otherwise the list of employee ids the user may act on. */
 export type EmployeeScope = "ALL" | string[];
@@ -11,6 +12,26 @@ export const canManageMasterData = isAdmin;
 export const canViewAnalytics = isManagerOrAdmin;
 export const canEditRecords = isManagerOrAdmin;
 export const canDeleteRecords = isAdmin;
+/** Labour rates, labour cost and parts cost */
+export const canViewCosts = isManagerOrAdmin;
+export const canManageInventory = (user: CurrentUser) => isAdmin(user) || user.isStoreManager;
+/** Supervisors may close only cards their employees worked on; that part is checked in src/lib/job-cards.ts */
+export const mayCloseJobCards = (user: CurrentUser) => isManagerOrAdmin(user) || isSupervisor(user);
+/** Fix / review QR work sessions (supervisors: only their employees' sessions) */
+export const canReviewSessions = (user: CurrentUser) => isManagerOrAdmin(user) || isSupervisor(user);
+/** Read-only list of job cards (to find a card, print its QR, see its details) */
+export const canBrowseJobCards = (user: CurrentUser) =>
+  isManagerOrAdmin(user) || isSupervisor(user) || user.isStoreManager;
+
+/** A logging way switched off in Settings stays available to admins only. */
+export function methodAllowed(user: CurrentUser, methods: Record<LoggingMethod, boolean>, method: LoggingMethod) {
+  return isAdmin(user) || methods[method];
+}
+
+/** Technicians record time by QR scan with their own login, which must be linked to an employee. */
+export function canScanTime(user: CurrentUser, methods: Record<LoggingMethod, boolean>) {
+  return !!user.employeeId && methodAllowed(user, methods, "qr");
+}
 
 function canEnterOwn(user: CurrentUser) {
   return user.role === "EMPLOYEE" && user.canEnterOwnRecords && !!user.employeeId;

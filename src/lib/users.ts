@@ -14,6 +14,7 @@ export type UserBody = {
   active?: boolean;
   employeeId?: string | null;
   canEnterOwnRecords?: boolean;
+  isStoreManager?: boolean;
 };
 
 export async function validateUserBody(body: UserBody, existingId?: string) {

@@ -14,6 +14,7 @@ type Employee = {
   fileNo: string;
   name: string;
   jobTitle: string;
+  hourlyRate: number;
   active: boolean;
   source: string;
   customFields: FieldValues;
@@ -95,6 +96,7 @@ export function EmployeesManager({
               <th>File No.</th>
               <th>Name</th>
               <th>Job Title</th>
+              <th className="text-right">Rate / h</th>
               <th>Supervisors</th>
               {fields.map((field) => (
                 <th key={field.id}>{field.label}</th>
@@ -107,7 +109,7 @@ export function EmployeesManager({
           <tbody>
             {employees.length === 0 && (
               <tr>
-                <td colSpan={7 + fields.length} className="py-8 text-center text-gray-500">No employees found.</td>
+                <td colSpan={8 + fields.length} className="py-8 text-center text-gray-500">No employees found.</td>
               </tr>
             )}
             {employees.map((employee) => (
@@ -118,6 +120,7 @@ export function EmployeesManager({
                   {employee.login && <div className="text-xs text-gray-500">Login: {employee.login}</div>}
                 </td>
                 <td>{employee.jobTitle}</td>
+                <td className="text-right">{employee.hourlyRate ? employee.hourlyRate.toFixed(3) : <span className="text-gray-400">—</span>}</td>
                 <td>{employee.supervisors.map((s) => s.name).join(", ") || <span className="text-gray-400">—</span>}</td>
                 {fields.map((field) => (
                   <td key={field.id}>{formatFieldValue(field, employee.customFields[field.key])}</td>
@@ -187,6 +190,7 @@ function EmployeeForm({
   const [fileNo, setFileNo] = useState(employee?.fileNo ?? "");
   const [name, setName] = useState(employee?.name ?? "");
   const [jobTitle, setJobTitle] = useState(employee?.jobTitle ?? "");
+  const [hourlyRate, setHourlyRate] = useState(employee?.hourlyRate ? String(employee.hourlyRate) : "");
   const [supervisorIds, setSupervisorIds] = useState<string[]>(employee?.supervisors.map((s) => s.id) ?? []);
   const [values, setValues] = useState<FieldValues>(employee?.customFields ?? {});
   const [busy, setBusy] = useState(false);
@@ -195,7 +199,7 @@ function EmployeeForm({
   async function save() {
     setBusy(true);
     setError("");
-    const body = { fileNo, name, jobTitle, supervisorIds, customFields: values };
+    const body = { fileNo, name, jobTitle, hourlyRate, supervisorIds, customFields: values };
     try {
       if (employee) await api(`/api/employees/${employee.id}`, { method: "PATCH", body });
       else await api("/api/employees", { body });
@@ -219,9 +223,13 @@ function EmployeeForm({
             <label className="label">Name *</label>
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <div className="sm:col-span-3">
+          <div className="sm:col-span-2">
             <label className="label">Job Title</label>
             <input className="input" value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Hourly rate (KWD)</label>
+            <input className="input" type="number" min="0" step="0.001" value={hourlyRate} onChange={(e) => setHourlyRate(e.target.value)} placeholder="0.000" />
           </div>
         </div>
         <div>

@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { canEnterRecords } from "@/lib/auth/access";
-import { HttpError, withUser } from "@/lib/http";
+import { HttpError, withUser, assertMethod } from "@/lib/http";
 import { importRecords } from "@/lib/records";
 import { parseWorkbook } from "@/lib/excel";
 import { getFieldDefinitions, toFieldDefs } from "@/lib/fields";
 import { readExcelUpload } from "@/lib/upload";
 
 export const POST = withUser(async (request, user) => {
+  await assertMethod(user, "excel");
   const { data, fileName } = await readExcelUpload(request);
   const fields = toFieldDefs(await getFieldDefinitions("RECORD"));
   const { rows, missingColumns } = await parseWorkbook(data, "records", fields);

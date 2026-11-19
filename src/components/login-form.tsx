@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { api, errorMessage } from "@/lib/client";
+import { safeNext } from "@/lib/safe-next";
 
-export function LoginForm() {
+export function LoginForm({ next = "/" }: { next?: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -15,7 +16,7 @@ export function LoginForm() {
     setError("");
     try {
       await api("/api/auth/login", { body: { email, password } });
-      window.location.href = "/";
+      window.location.href = safeNext(next);
     } catch (err) {
       setError(errorMessage(err));
       setBusy(false);

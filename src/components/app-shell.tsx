@@ -7,6 +7,7 @@ import { useState } from "react";
 import {
   ChartColumn,
   Camera,
+  Clock,
   CreditCard,
   History,
   House,
@@ -14,8 +15,10 @@ import {
   List,
   LogOut,
   Menu,
+  Package,
   Plus,
   Settings,
+  Timer,
   Upload,
   User,
   Users,
@@ -36,6 +39,9 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   user: User,
   history: History,
   settings: Settings,
+  timer: Timer,
+  clock: Clock,
+  box: Package,
 };
 
 function isActive(pathname: string, href: string) {

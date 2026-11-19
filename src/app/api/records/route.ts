@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { canEnterRecords } from "@/lib/auth/access";
-import { HttpError, readJson, withUser } from "@/lib/http";
+import { HttpError, readJson, withUser, assertMethod } from "@/lib/http";
 import { createRecords } from "@/lib/records";
 
 type Body = {
@@ -22,6 +22,7 @@ type Body = {
 
 /** Manual entry: one employee, one or more job card lines (like the paper sheet). */
 export const POST = withUser(async (request, user) => {
+  await assertMethod(user, "manual");
   const body = await readJson<Body>(request);
   if (!body.employeeId) throw new HttpError(400, "Choose an employee.");
   const rows = (body.rows ?? []).filter((row) => row.jobCardCode || row.hours || row.startDate);

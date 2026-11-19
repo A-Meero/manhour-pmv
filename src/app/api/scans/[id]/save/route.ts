@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { canEnterRecords, isAdmin } from "@/lib/auth/access";
-import { HttpError, readJson, withUser } from "@/lib/http";
+import { HttpError, readJson, withUser, assertMethod } from "@/lib/http";
 import { createRecords } from "@/lib/records";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -16,6 +16,7 @@ type Body = {
 
 /** Saves the reviewed rows of a photographed sheet. Valid rows are saved; invalid ones are returned for fixing. */
 export const POST = withUser<Ctx>(async (request, user, { params }) => {
+  await assertMethod(user, "photo");
   const { id } = await params;
   const scan = await prisma.scanSheet.findUnique({ where: { id } });
   if (!scan) throw new HttpError(404, "Scan not found.");

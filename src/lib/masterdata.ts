@@ -118,8 +118,17 @@ export type EmployeeInput = {
   jobTitle?: unknown;
   /** Supervisor login emails, comma/semicolon separated or an array */
   supervisors?: unknown;
+  /** KWD per hour; empty = 0 */
+  hourlyRate?: unknown;
   fields?: Record<string, unknown>;
 };
+
+/** Parses a money/quantity value ("2.750", 2.75, "2,750" → 2.75). null = invalid, undefined = empty. */
+export function parseAmount(value: unknown): number | null | undefined {
+  if (value === null || value === undefined || String(value).trim() === "") return undefined;
+  const parsed = typeof value === "number" ? value : Number(String(value).trim().replace(",", "."));
+  return Number.isFinite(parsed) ? Math.round(parsed * 1000) / 1000 : null;
+}
 
 export function splitList(value: unknown): string[] {
   if (Array.isArray(value)) return value.map((entry) => String(entry).trim()).filter(Boolean);
@@ -166,6 +175,8 @@ export async function importEmployees(items: EmployeeInput[], meta: BatchMeta, r
     }
     const errors: string[] = [];
     if (!name) errors.push("Employee name is required");
+    const hourlyRate = parseAmount(item.hourlyRate);
+    if (hourlyRate === null || (hourlyRate !== undefined && (hourlyRate < 0 || hourlyRate > 9999999))) errors.push("Hourly rate must be a number of 0 or more");
     const supervisorIds: string[] = [];
     for (const email of splitList(item.supervisors)) {
       const id = userByEmail.get(email.toLowerCase());
@@ -185,6 +196,7 @@ export async function importEmployees(items: EmployeeInput[], meta: BatchMeta, r
           fileNo,
           name,
           jobTitle,
+          hourlyRate: hourlyRate ?? 0,
           customFields: custom.values,
           source: meta.source,
           supervisors: { create: supervisorIds.map((supervisorId) => ({ supervisorId })) },

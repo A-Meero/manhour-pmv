@@ -19,6 +19,8 @@ export type CurrentUser = {
   role: UserRole;
   employeeId: string | null;
   canEnterOwnRecords: boolean;
+  /** Issues spare parts and manages the inventory */
+  isStoreManager: boolean;
   /** Employees this user is assigned to supervise */
   supervisedEmployeeIds: string[];
 };
@@ -90,6 +92,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       active: true,
       employeeId: true,
       canEnterOwnRecords: true,
+      isStoreManager: true,
       sessionVersion: true,
       supervising: { select: { employeeId: true } },
     },
@@ -104,6 +107,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     role: user.role,
     employeeId: user.employeeId,
     canEnterOwnRecords: user.canEnterOwnRecords,
+    isStoreManager: user.isStoreManager,
     supervisedEmployeeIds: user.supervising.map((entry) => entry.employeeId),
   };
 }

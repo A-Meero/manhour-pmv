@@ -1,8 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { getViewScope } from "@/lib/auth/access";
+import { canViewCosts, getViewScope } from "@/lib/auth/access";
+import { round3 } from "@/lib/money";
 import { withUser } from "@/lib/http";
 import { buildRecordWhere, readFilters, recordInclude } from "@/lib/record-query";
 import { buildSheet, xlsxResponse } from "@/lib/excel";
+
+const SOURCE_LABEL: Record<string, string> = { MANUAL: "Manual", EXCEL: "Excel", API: "API", PHOTO: "Photo", QR: "QR scan" };
 import { getFieldDefinitions } from "@/lib/fields";
 
 export const GET = withUser(async (request, user) => {
@@ -23,6 +26,12 @@ export const GET = withUser(async (request, user) => {
       { header: "Start Date", key: "startDate", date: true },
       { header: "End Date", key: "endDate", date: true },
       { header: "Hours Worked", key: "hours" },
+      ...(canViewCosts(user)
+        ? [
+            { header: "Hourly Rate (KWD)", key: "rate" },
+            { header: "Labour Cost (KWD)", key: "labourCost" },
+          ]
+        : []),
       { header: "Remarks", key: "remarks", width: 30 },
       ...fields.map((field) => ({ header: field.label, key: `f_${field.key}` })),
       { header: "Prepared By", key: "preparedBy" },
@@ -44,13 +53,19 @@ export const GET = withUser(async (request, user) => {
         startDate: record.startDate,
         endDate: record.endDate,
         hours: Number(record.hours),
+        ...(canViewCosts(user)
+          ? (() => {
+              const rate = Number(record.hourlyRate ?? record.employee.hourlyRate);
+              return { rate, labourCost: round3(rate * Number(record.hours)) };
+            })()
+          : {}),
         remarks: record.remarks,
         ...Object.fromEntries(fields.map((field) => [`f_${field.key}`, custom[field.key] ?? ""])),
         preparedBy: record.preparedByName,
         preparedDate: record.preparedByDate,
         approvedBy: record.approvedByName,
         approvedDate: record.approvedByDate,
-        source: record.source,
+        source: SOURCE_LABEL[record.source] ?? record.source,
         createdBy: record.createdBy?.name ?? "",
         createdAt: record.createdAt.toISOString().replace("T", " ").slice(0, 16),
       };

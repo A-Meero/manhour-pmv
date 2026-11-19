@@ -1,12 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { requirePage } from "@/lib/auth/guards";
-import { canEnterRecords, canManageMasterData, isAdmin } from "@/lib/auth/access";
+import { canEnterRecords, canManageInventory, canManageMasterData, isAdmin } from "@/lib/auth/access";
 import { PageHeader, SOURCE_LABEL } from "@/components/ui";
 
-const KIND_LABEL = { JOB_CARDS: "Job cards", EMPLOYEES: "Employees", RECORDS: "Records" } as const;
+const KIND_LABEL = { JOB_CARDS: "Job cards", EMPLOYEES: "Employees", RECORDS: "Records", PARTS: "Spare parts" } as const;
 
 export default async function ImportsPage() {
-  const user = await requirePage((u) => canManageMasterData(u) || canEnterRecords(u));
+  const user = await requirePage((u) => canManageMasterData(u) || canEnterRecords(u) || canManageInventory(u));
   const batches = await prisma.importBatch.findMany({
     where: isAdmin(user) ? {} : { createdById: user.id },
     orderBy: { createdAt: "desc" },

@@ -3,6 +3,9 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { validateCsrf } from "@/lib/csrf";
 import { getCurrentUser, type CurrentUser } from "@/lib/auth/session";
+import { methodAllowed } from "@/lib/auth/access";
+import { getSettings } from "@/lib/settings";
+import { LOGGING_METHOD_INFO, type LoggingMethod } from "@/lib/logging-methods";
 
 export class HttpError extends Error {
   constructor(public status: number, message: string, public details?: unknown) {
@@ -34,6 +37,14 @@ export function withUser<C = unknown>(handler: Handler<C>, check?: (user: Curren
       return jsonError(500, "Something went wrong. Please try again.");
     }
   };
+}
+
+/** Throws 403 when a logging way is switched off in Settings (admins are never blocked). */
+export async function assertMethod(user: CurrentUser, method: LoggingMethod) {
+  const { methods } = await getSettings();
+  if (!methodAllowed(user, methods, method)) {
+    throw new HttpError(403, `${LOGGING_METHOD_INFO[method].label} is switched off by the administrator.`);
+  }
 }
 
 export async function readJson<T>(request: Request): Promise<T> {

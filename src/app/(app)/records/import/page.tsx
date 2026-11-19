@@ -1,10 +1,10 @@
-import { requirePage } from "@/lib/auth/guards";
-import { canEnterRecords, isManagerOrAdmin } from "@/lib/auth/access";
+import { requireMethodPage } from "@/lib/auth/guards";
+import { isManagerOrAdmin } from "@/lib/auth/access";
 import { PageHeader } from "@/components/ui";
 import { RecordsImport } from "@/components/records-import";
 
 export default async function ImportRecordsPage() {
-  const user = await requirePage(canEnterRecords);
+  const user = await requireMethodPage("excel");
   return (
     <>
       <PageHeader title="Import records from Excel" description="Each row is one job for one employee with a start and end date." />

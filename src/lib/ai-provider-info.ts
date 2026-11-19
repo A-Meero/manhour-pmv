@@ -17,7 +17,7 @@ export const PROVIDER_INFO: Record<
   gemini: {
     label: "Google Gemini",
     defaultBaseUrl: "https://generativelanguage.googleapis.com",
-    modelHint: "e.g. gemini-2.5-flash",
+    modelHint: "e.g. gemini-flash-latest (a model ID from ai.google.dev/gemini-api/docs/models, not a plan name)",
     keyHint: "Create a key at aistudio.google.com",
     keyRequired: true,
   },

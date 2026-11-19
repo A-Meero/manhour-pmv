@@ -28,6 +28,7 @@ export const PATCH = withUser<Ctx>(async (request, user, { params }) => {
     ...(body.active !== undefined ? { active: body.active } : {}),
     ...(body.employeeId !== undefined ? { employeeId: body.employeeId || null } : {}),
     canEnterOwnRecords: role === "EMPLOYEE" ? (body.canEnterOwnRecords ?? existing.canEnterOwnRecords) : false,
+    ...(body.isStoreManager !== undefined ? { isStoreManager: !!body.isStoreManager } : {}),
   };
   const revoke = !!body.password || body.active === false || (body.role && body.role !== existing.role);
   if (body.password) data.passwordHash = await hash(body.password, 10);

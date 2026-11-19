@@ -51,22 +51,46 @@ async function callAnthropic(p: ResolvedProvider, input: Input) {
 }
 
 async function callGemini(p: ResolvedProvider, input: Input) {
+  // Accept what people commonly paste: "models/gemini-2.5-flash", or a base URL that already ends in /v1beta.
+  const model = p.model.trim().replace(/^models\//, "");
+  const baseUrl = p.baseUrl.replace(/\/(v1beta|v1)(\/models)?$/, "");
   const parts: unknown[] = [];
   if (input.image) parts.push({ inline_data: { mime_type: input.image.mimeType, data: input.image.data.toString("base64") } });
   parts.push({ text: input.prompt });
   const response = await post(
-    `${p.baseUrl}/v1beta/models/${encodeURIComponent(p.model)}:generateContent`,
+    `${baseUrl}/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     { "x-goog-api-key": p.apiKey },
-    { contents: [{ role: "user", parts }], generationConfig: { maxOutputTokens: input.maxTokens, temperature: 0 } },
+    // No maxOutputTokens: Gemini 2.5+ counts its hidden "thinking" tokens against that limit, so a cap
+    // (e.g. 512 for the test) can be used up before any answer text is written. The model's own maximum applies.
+    { contents: [{ role: "user", parts }], generationConfig: { temperature: 0 } },
     p.timeoutSeconds,
   );
-  if (!response.ok) throw await readError(response, "API error");
+  if (!response.ok) {
+    const error = await readError(response, "API error");
+    if (response.status === 404 || /model name format/i.test(error.message)) {
+      error.message += ` — check the model name ("${model}"); use a Gemini model ID such as gemini-flash-latest.`;
+    }
+    throw error;
+  }
   const payload = (await response.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
+    candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[];
     promptFeedback?: { blockReason?: string };
   };
   if (payload.promptFeedback?.blockReason) throw new Error(`Gemini blocked the request (${payload.promptFeedback.blockReason})`);
-  return (payload.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join("\n");
+  const candidate = payload.candidates?.[0];
+  const text = (candidate?.content?.parts ?? [])
+    .filter((part) => !part.thought)
+    .map((part) => part.text ?? "")
+    .join("\n");
+  if (!text.trim()) {
+    const reason = candidate?.finishReason;
+    throw new Error(
+      reason === "MAX_TOKENS"
+        ? "Gemini ran out of output tokens before writing an answer"
+        : `Gemini returned no text${reason ? ` (finish reason: ${reason})` : ""}`,
+    );
+  }
+  return text;
 }
 
 async function callOpenAiStyle(p: ResolvedProvider, input: Input) {

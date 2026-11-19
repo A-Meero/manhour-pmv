@@ -21,6 +21,7 @@ export const POST = withUser(async (request, user) => {
       active: body.active ?? true,
       employeeId: body.employeeId || null,
       canEnterOwnRecords: body.role === "EMPLOYEE" ? !!body.canEnterOwnRecords : false,
+      isStoreManager: !!body.isStoreManager,
     },
   });
   await audit(user.id, "USER_CREATED", "User", created.id, { email: created.email, role: created.role });

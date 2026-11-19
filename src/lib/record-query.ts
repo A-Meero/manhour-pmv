@@ -57,7 +57,7 @@ export function buildRecordWhere(filters: RecordFilters, scope: EmployeeScope): 
 }
 
 export const recordInclude = {
-  employee: { select: { id: true, fileNo: true, name: true, jobTitle: true } },
+  employee: { select: { id: true, fileNo: true, name: true, jobTitle: true, hourlyRate: true } },
   jobCard: { select: { code: true } },
   createdBy: { select: { name: true } },
 } satisfies Prisma.ManHourRecordInclude;

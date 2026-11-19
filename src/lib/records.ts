@@ -3,7 +3,9 @@ import "server-only";
 import { Prisma, type DataSource } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { CurrentUser } from "@/lib/auth/session";
-import { getEntryScope, isAdmin, scopeAllows } from "@/lib/auth/access";
+import { getEntryScope, isAdmin, methodAllowed, scopeAllows } from "@/lib/auth/access";
+import { HttpError } from "@/lib/http";
+import { LOGGING_METHOD_INFO, METHOD_FOR_SOURCE } from "@/lib/logging-methods";
 import { getSettings, type AppSettings } from "@/lib/settings";
 import { getFieldDefinitions, toFieldDefs, validateCustomFields, type FieldDef } from "@/lib/fields";
 import { addDays, formatDate, parseDate, spreadHours, toIsoDate, weekStart } from "@/lib/dates";
@@ -125,11 +127,11 @@ class LoadTracker {
   }
 }
 
-function supervisorNames(employee: { supervisors: { supervisor: { name: string } }[] }) {
+export function supervisorNames(employee: { supervisors: { supervisor: { name: string } }[] }) {
   return employee.supervisors.map((entry) => entry.supervisor.name).join(", ");
 }
 
-const employeeInclude = {
+export const employeeInclude = {
   supervisors: { include: { supervisor: { select: { name: true } } } },
 } satisfies Prisma.EmployeeInclude;
 
@@ -142,6 +144,10 @@ const employeeInclude = {
 export async function createRecords(inputs: RecordInput[], options: Options): Promise<CreateResult> {
   const { actor } = options;
   const settings = await getSettings();
+  const method = METHOD_FOR_SOURCE[options.source];
+  if (method && !methodAllowed(actor, settings.methods, method)) {
+    throw new HttpError(403, `${LOGGING_METHOD_INFO[method].label} is switched off by the administrator.`);
+  }
   const fieldDefs: FieldDef[] = toFieldDefs(await getFieldDefinitions("RECORD"));
   const scope = getEntryScope(actor);
 
@@ -197,6 +203,7 @@ export async function createRecords(inputs: RecordInput[], options: Options): Pr
     if (!code) errors.push("Job card ID is required");
     else if (!jobCard) errors.push(`Job card "${code}" not found`);
     else if (!jobCard.active) errors.push(`Job card "${code}" is inactive`);
+    else if (jobCard.status === "CLOSED" && !isAdmin(actor)) errors.push(`Job card "${code}" is closed`);
 
     const start = parseDate(input.startDate);
     const end = parseDate(input.endDate);
@@ -247,6 +254,7 @@ export async function createRecords(inputs: RecordInput[], options: Options): Pr
         employeeName: employee.name,
         jobTitle: employee.jobTitle,
         supervisorName: supervisorNames(employee),
+        hourlyRate: employee.hourlyRate,
         preparedByName: String(input.preparedByName ?? "").trim(),
         preparedByDate,
         approvedByName: String(input.approvedByName ?? "").trim(),
@@ -330,6 +338,18 @@ export type RecordUpdate = {
 export async function updateRecord(id: string, update: RecordUpdate, actor: CurrentUser): Promise<string[] | null> {
   const current = await prisma.manHourRecord.findUnique({ where: { id }, include: { jobCard: true } });
   if (!current) return ["Record not found"];
+  if (current.source === "QR") {
+    const locked = ["employeeId", "jobCardCode", "startDate", "endDate", "hours"] as const;
+    const changed = locked.filter((key) => {
+      if (update[key] === undefined) return false;
+      if (key === "employeeId") return update.employeeId !== current.employeeId;
+      if (key === "jobCardCode") return normalizeCode(update.jobCardCode) !== current.jobCard.code;
+      if (key === "hours") return parseHours(update.hours) !== Number(current.hours);
+      const date = parseDate(update[key]);
+      return toIsoDate(date) !== toIsoDate(key === "startDate" ? current.startDate : current.endDate);
+    });
+    if (changed.length) return ["This record comes from QR scans: correct its work sessions instead (Work Sessions page or the job card page)"];
+  }
 
   const errors: string[] = [];
   const employeeId = update.employeeId ?? current.employeeId;

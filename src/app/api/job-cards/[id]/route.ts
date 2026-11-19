@@ -35,8 +35,13 @@ export const PATCH = withUser<Ctx>(async (request, user, { params }) => {
 
 export const DELETE = withUser<Ctx>(async (_request, user, { params }) => {
   const { id } = await params;
-  const count = await prisma.manHourRecord.count({ where: { jobCardId: id } });
+  const [count, sessions, movements] = await Promise.all([
+    prisma.manHourRecord.count({ where: { jobCardId: id } }),
+    prisma.workSession.count({ where: { jobCardId: id } }),
+    prisma.stockMovement.count({ where: { jobCardId: id } }),
+  ]);
   if (count > 0) throw new HttpError(409, `This job card is used by ${count} record(s). Deactivate it instead.`);
+  if (sessions + movements > 0) throw new HttpError(409, "This job card has work sessions or issued parts. Deactivate it instead.");
   await prisma.jobCard.delete({ where: { id } });
   await audit(user.id, "JOB_CARD_DELETED", "JobCard", id);
   return NextResponse.json({ ok: true });

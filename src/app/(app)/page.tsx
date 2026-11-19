@@ -1,8 +1,20 @@
 import Link from "next/link";
-import { Camera, ChartColumn, FileSpreadsheet, List, Plus, Printer } from "lucide-react";
+import { Camera, ChartColumn, Clock, CreditCard, FileSpreadsheet, List, Package, Plus, Printer, Timer } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth/guards";
-import { canEnterRecords, canViewAnalytics, getViewScope, scopeWhere } from "@/lib/auth/access";
+import {
+  canBrowseJobCards,
+  canEnterRecords,
+  canManageInventory,
+  canReviewSessions,
+  canScanTime,
+  canViewAnalytics,
+  getViewScope,
+  methodAllowed,
+  scopeWhere,
+} from "@/lib/auth/access";
+import { autoStopStale, reviewScopeWhere, sessionHours } from "@/lib/work-sessions";
+import { formatTime } from "@/lib/dates";
 import { getSettings } from "@/lib/settings";
 import { addDays, todayUtc, weekStart } from "@/lib/dates";
 import { PageHeader } from "@/components/ui";
@@ -17,11 +29,25 @@ export default async function HomePage() {
   const wk = weekStart(today, settings.weekStartDay);
   const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
   const base = scopeWhere(scope);
+  const allowed = (method: "manual" | "excel" | "photo" | "qr") => methodAllowed(user, settings.methods, method);
+  const scans = canScanTime(user, settings.methods);
+  const reviews = allowed("qr") && canReviewSessions(user);
+  if (scans && user.employeeId) await autoStopStale({ employeeId: user.employeeId });
+  if (reviews) await autoStopStale(reviewScopeWhere(user));
 
+  const [running, toReview, lowStock] = await Promise.all([
+    scans && user.employeeId
+      ? prisma.workSession.findFirst({ where: { employeeId: user.employeeId, endedAt: null }, include: { jobCard: { select: { code: true } } } })
+      : Promise.resolve(null),
+    reviews ? prisma.workSession.count({ where: { ...reviewScopeWhere(user), needsReview: true } }) : Promise.resolve(0),
+    canManageInventory(user)
+      ? prisma.part.count({ where: { active: true, minQty: { not: null }, qtyOnHand: { lte: prisma.part.fields.minQty } } })
+      : Promise.resolve(0),
+  ]);
   const [weekAgg, monthAgg, pendingScans, recent] = await Promise.all([
     prisma.manHourRecord.aggregate({ where: { ...base, startDate: { gte: wk, lte: addDays(wk, 6) } }, _sum: { hours: true }, _count: true }),
     prisma.manHourRecord.aggregate({ where: { ...base, startDate: { gte: monthStart } }, _sum: { hours: true }, _count: true }),
-    canEnterRecords(user) ? prisma.scanSheet.count({ where: { status: "PENDING_REVIEW", uploadedById: user.id } }) : Promise.resolve(0),
+    canEnterRecords(user) && allowed("photo") ? prisma.scanSheet.count({ where: { status: "PENDING_REVIEW", uploadedById: user.id } }) : Promise.resolve(0),
     prisma.manHourRecord.findMany({
       where: base,
       orderBy: { createdAt: "desc" },
@@ -31,13 +57,13 @@ export default async function HomePage() {
   ]);
 
   const actions = [
-    ...(canEnterRecords(user)
-      ? [
-          { href: "/records/new", label: "New entry", icon: Plus },
-          { href: "/records/scan", label: "Scan a sheet", icon: Camera },
-          { href: "/records/import", label: "Import Excel", icon: FileSpreadsheet },
-        ]
-      : []),
+    ...(scans ? [{ href: "/my-work", label: "My work", icon: Timer }] : []),
+    ...(canEnterRecords(user) && allowed("manual") ? [{ href: "/records/new", label: "New entry", icon: Plus }] : []),
+    ...(canEnterRecords(user) && allowed("photo") ? [{ href: "/records/scan", label: "Scan a sheet", icon: Camera }] : []),
+    ...(canEnterRecords(user) && allowed("excel") ? [{ href: "/records/import", label: "Import Excel", icon: FileSpreadsheet }] : []),
+    ...(reviews ? [{ href: "/sessions", label: "Work sessions", icon: Clock }] : []),
+    ...(canBrowseJobCards(user) ? [{ href: "/job-cards", label: "Job cards", icon: CreditCard }] : []),
+    ...(canManageInventory(user) ? [{ href: "/inventory", label: "Inventory", icon: Package }] : []),
     { href: "/records", label: "Records", icon: List },
     ...(canViewAnalytics(user) ? [{ href: "/analytics", label: "Analytics", icon: ChartColumn }] : []),
   ];
@@ -54,6 +80,25 @@ export default async function HomePage() {
         ))}
       </div>
 
+      {running && (
+        <Link
+          href={`/jc/${encodeURIComponent(running.jobCard.code)}`}
+          className="mb-5 block rounded-md border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-900"
+        >
+          You are working on <b className="font-mono">{running.jobCard.code}</b> since {formatTime(running.startedAt)} (
+          {fmt(sessionHours(running.startedAt, null))}h). Tap to stop →
+        </Link>
+      )}
+      {toReview > 0 && (
+        <Link href="/sessions" className="mb-5 block rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {toReview} QR work session(s) need review (no stop scan, or over the hour limits) →
+        </Link>
+      )}
+      {lowStock > 0 && (
+        <Link href="/inventory?show=low" className="mb-5 block rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          {lowStock} spare part(s) are at or below their low stock level →
+        </Link>
+      )}
       {pendingScans > 0 && (
         <Link href="/records/scan" className="mb-5 block rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           You have {pendingScans} scanned sheet(s) waiting for review →

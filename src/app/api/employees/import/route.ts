@@ -19,6 +19,7 @@ export const POST = withUser(async (request, user) => {
       name: row.values.name,
       jobTitle: row.values.jobTitle,
       supervisors: row.values.supervisors,
+      hourlyRate: row.values.hourlyRate,
       fields: row.fields,
     })),
     { source: "EXCEL", actorId: user.id, fileName },

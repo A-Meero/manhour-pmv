@@ -42,6 +42,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
           role: user.role,
           active: user.active,
           canEnterOwnRecords: user.canEnterOwnRecords,
+          isStoreManager: user.isStoreManager,
           employee: user.employee,
           supervising: user._count.supervising,
         }))}

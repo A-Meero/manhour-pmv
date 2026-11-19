@@ -20,7 +20,11 @@ export const DELETE = withUser<Ctx>(async (_request, user, { params }) => {
   const { id } = await params;
   const record = await prisma.manHourRecord.findUnique({ where: { id }, include: { jobCard: true, employee: true } });
   if (!record) throw new HttpError(404, "Record not found.");
-  await prisma.manHourRecord.delete({ where: { id } });
+  await prisma.$transaction([
+    // A QR record is the sum of its work sessions, so they go with it.
+    ...(record.source === "QR" ? [prisma.workSession.deleteMany({ where: { employeeId: record.employeeId, jobCardId: record.jobCardId } })] : []),
+    prisma.manHourRecord.delete({ where: { id } }),
+  ]);
   await audit(user.id, "RECORD_DELETED", "ManHourRecord", id, {
     employee: record.employee.fileNo,
     jobCard: record.jobCard.code,

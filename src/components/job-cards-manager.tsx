@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Plus, Trash2, Upload } from "lucide-react";
+import Link from "next/link";
+import { Pencil, Plus, Printer, QrCode, Trash2, Upload } from "lucide-react";
 import { api, errorMessage } from "@/lib/client";
 import { Alert, Modal, SOURCE_LABEL, StatusBadge } from "@/components/ui";
 import { ImportPanel } from "@/components/import-panel";
@@ -12,15 +13,29 @@ type Card = {
   id: string;
   code: string;
   active: boolean;
+  status: "OPEN" | "CLOSED";
+  closedAt: string | null;
   source: string;
   customFields: FieldValues;
   records: number;
+  /** records + sessions + issued parts: the card can no longer be deleted */
+  inUse: number;
   createdAt: string;
 };
 
 type Summary = { created: number; skipped: number; failed: number; issues: { value: string; reason: string }[] };
 
-export function JobCardsManager({ cards, fields, filters }: { cards: Card[]; fields: ClientField[]; filters: { q: string; status: string } }) {
+export function JobCardsManager({
+  cards,
+  fields,
+  filters,
+  canManage,
+}: {
+  cards: Card[];
+  fields: ClientField[];
+  filters: { q: string; status: string };
+  canManage: boolean;
+}) {
   const router = useRouter();
   const [mode, setMode] = useState<"add" | "import" | null>(null);
   const [editing, setEditing] = useState<Card | null>(null);
@@ -54,18 +69,27 @@ export function JobCardsManager({ cards, fields, filters }: { cards: Card[]; fie
           <input name="q" defaultValue={filters.q} placeholder="Search job card ID" className="input sm:max-w-xs" />
           <select name="status" defaultValue={filters.status} className="input sm:w-40">
             <option value="all">All</option>
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
           <button className="btn">Search</button>
         </form>
-        <div className="flex gap-2">
-          <button className="btn" onClick={() => setMode("import")}>
-            <Upload className="h-4 w-4" /> Import Excel
-          </button>
-          <button className="btn btn-primary" onClick={() => setMode("add")}>
-            <Plus className="h-4 w-4" /> Add
-          </button>
+        <div className="flex flex-wrap gap-2">
+          <a className="btn" href="/api/templates/qr-labels?status=open" target="_blank" title="QR labels for every open, active job card">
+            <Printer className="h-4 w-4" /> QR labels (open cards)
+          </a>
+          {canManage && (
+            <>
+              <button className="btn" onClick={() => setMode("import")}>
+                <Upload className="h-4 w-4" /> Import Excel
+              </button>
+              <button className="btn btn-primary" onClick={() => setMode("add")}>
+                <Plus className="h-4 w-4" /> Add
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -93,25 +117,41 @@ export function JobCardsManager({ cards, fields, filters }: { cards: Card[]; fie
             )}
             {cards.map((card) => (
               <tr key={card.id}>
-                <td className="font-mono font-semibold">{card.code}</td>
+                <td className="font-mono font-semibold">
+                  <Link href={`/job-cards/${card.id}`} className="text-brand hover:underline">{card.code}</Link>
+                </td>
                 {fields.map((field) => (
                   <td key={field.id}>{formatFieldValue(field, card.customFields[field.key])}</td>
                 ))}
                 <td>{card.records}</td>
                 <td>{SOURCE_LABEL[card.source] ?? card.source}</td>
                 <td>
-                  <StatusBadge active={card.active} />
+                  <div className="flex flex-wrap gap-1">
+                    {card.status === "CLOSED" ? (
+                      <span className="badge bg-gray-800 text-white" title={card.closedAt ? `Closed ${new Date(card.closedAt).toLocaleString("en-GB")}` : undefined}>Closed</span>
+                    ) : (
+                      <span className="badge bg-blue-100 text-blue-800">Open</span>
+                    )}
+                    {!card.active && <StatusBadge active={false} />}
+                  </div>
                 </td>
                 <td>
                   <div className="flex justify-end gap-1">
+                    <a className="btn btn-sm" href={`/api/templates/qr-labels?ids=${card.id}`} target="_blank" aria-label="Print QR label" title="Print QR label">
+                      <QrCode className="h-3.5 w-3.5" />
+                    </a>
+                    {canManage && (
+                      <>
                     <button className="btn btn-sm" onClick={() => setEditing(card)} aria-label="Edit">
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     <button className="btn btn-sm" onClick={() => toggle(card)}>{card.active ? "Deactivate" : "Activate"}</button>
-                    {card.records === 0 && (
+                    {card.inUse === 0 && (
                       <button className="btn btn-sm btn-danger" onClick={() => remove(card)} aria-label="Delete">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
+                    )}
+                      </>
                     )}
                   </div>
                 </td>

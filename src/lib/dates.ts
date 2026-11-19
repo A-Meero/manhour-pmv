@@ -77,3 +77,31 @@ export function spreadHours(start: Date, end: Date, hours: number): { day: Date;
 }
 
 export const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+/** Time zone used for the calendar day of clock times (QR scans). */
+export const APP_TIME_ZONE = "Asia/Kuwait";
+
+const dayFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: APP_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" });
+
+/** The calendar day (as a UTC-midnight Date, like record dates) of a moment in time, in the app's time zone. */
+export function localDay(moment: Date): Date {
+  return new Date(`${dayFormatter.format(moment)}T00:00:00.000Z`);
+}
+
+/** "08:15" in the app's time zone */
+export function formatTime(moment: Date): string {
+  return moment.toLocaleTimeString("en-GB", { timeZone: APP_TIME_ZONE, hour: "2-digit", minute: "2-digit" });
+}
+
+/** "19/11/2026 08:15" in the app's time zone */
+export function formatDateTime(moment: Date): string {
+  return moment.toLocaleString("en-GB", { timeZone: APP_TIME_ZONE, day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/** Kuwait has no daylight saving time, so its offset is fixed. */
+const APP_UTC_OFFSET = "+03:00";
+
+/** The moment a calendar day (UTC-midnight Date) starts in the app's time zone. */
+export function startOfLocalDay(day: Date): Date {
+  return new Date(`${toIsoDate(day)}T00:00:00${APP_UTC_OFFSET}`);
+}

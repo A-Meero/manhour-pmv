@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { canManageMasterData } from "@/lib/auth/access";
 import { HttpError, readJson, withUser } from "@/lib/http";
-import { normalizeCode } from "@/lib/masterdata";
+import { normalizeCode, parseAmount } from "@/lib/masterdata";
 import { getFieldDefinitions, toFieldDefs, validateCustomFields } from "@/lib/fields";
 import { audit } from "@/lib/audit";
 
@@ -12,6 +12,7 @@ type EmployeeBody = {
   fileNo?: string;
   name?: string;
   jobTitle?: string;
+  hourlyRate?: string | number;
   active?: boolean;
   supervisorIds?: string[];
   customFields?: Record<string, unknown>;
@@ -31,6 +32,8 @@ export const PATCH = withUser<Ctx>(async (request, user, { params }) => {
   const name = body.name !== undefined ? body.name.trim() : existing.name;
   if (!name) throw new HttpError(400, "Name is required.");
 
+  const hourlyRate = body.hourlyRate !== undefined ? parseAmount(body.hourlyRate) : undefined;
+  if (hourlyRate === null || (hourlyRate !== undefined && hourlyRate < 0)) throw new HttpError(400, "Hourly rate must be a number of 0 or more.");
   let customFields = existing.customFields as Record<string, unknown>;
   if (body.customFields) {
     const custom = validateCustomFields(toFieldDefs(await getFieldDefinitions("EMPLOYEE")), body.customFields);
@@ -45,6 +48,7 @@ export const PATCH = withUser<Ctx>(async (request, user, { params }) => {
         fileNo,
         name,
         jobTitle: body.jobTitle !== undefined ? body.jobTitle.trim() : existing.jobTitle,
+        ...(body.hourlyRate !== undefined ? { hourlyRate: hourlyRate ?? 0 } : {}),
         active: body.active ?? existing.active,
         customFields: customFields as Prisma.InputJsonValue,
       },
@@ -65,8 +69,11 @@ export const PATCH = withUser<Ctx>(async (request, user, { params }) => {
 
 export const DELETE = withUser<Ctx>(async (_request, user, { params }) => {
   const { id } = await params;
-  const count = await prisma.manHourRecord.count({ where: { employeeId: id } });
-  if (count > 0) throw new HttpError(409, `This employee has ${count} record(s). Deactivate the employee instead.`);
+  const [count, sessions] = await Promise.all([
+    prisma.manHourRecord.count({ where: { employeeId: id } }),
+    prisma.workSession.count({ where: { employeeId: id } }),
+  ]);
+  if (count + sessions > 0) throw new HttpError(409, `This employee has ${count} record(s) or QR sessions. Deactivate the employee instead.`);
   await prisma.employee.delete({ where: { id } });
   await audit(user.id, "EMPLOYEE_DELETED", "Employee", id);
   return NextResponse.json({ ok: true });

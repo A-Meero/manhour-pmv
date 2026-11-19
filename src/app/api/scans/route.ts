@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { canEnterRecords } from "@/lib/auth/access";
-import { HttpError, withUser } from "@/lib/http";
+import { HttpError, withUser, assertMethod } from "@/lib/http";
 import { emptySheet, extractSheet } from "@/lib/ocr";
 import { scanRoot } from "@/lib/scans";
 import { audit } from "@/lib/audit";
@@ -15,6 +15,7 @@ const MAX_BYTES = 15 * 1024 * 1024;
 
 /** Upload a photo of a filled sheet; stores it and reads it with the AI providers from Settings (in priority order), else Tesseract. */
 export const POST = withUser(async (request, user) => {
+  await assertMethod(user, "photo");
   const form = await request.formData().catch(() => null);
   const file = form?.get("image");
   if (!file || typeof file === "string") throw new HttpError(400, "Take or choose a photo of the sheet.");

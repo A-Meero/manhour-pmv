@@ -22,6 +22,9 @@ export default async function SettingsPage() {
           dailyHourLimit: settings.dailyHourLimit === null ? "" : String(settings.dailyHourLimit),
           weeklyHourLimit: settings.weeklyHourLimit === null ? "" : String(settings.weeklyHourLimit),
           weekStartDay: String(settings.weekStartDay),
+          methods: settings.methods,
+          maxSessionHours: String(settings.maxSessionHours),
+          appBaseUrl: settings.appBaseUrl,
         }}
         ocr={{
           providers: providers.map(toPublic),

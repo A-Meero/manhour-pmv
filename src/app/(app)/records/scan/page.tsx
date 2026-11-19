@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { Printer } from "lucide-react";
 import { prisma } from "@/lib/prisma";
-import { requirePage } from "@/lib/auth/guards";
-import { canEnterRecords, isAdmin } from "@/lib/auth/access";
+import { requireMethodPage } from "@/lib/auth/guards";
+import { isAdmin } from "@/lib/auth/access";
 import { activeProviders } from "@/lib/ai-providers";
 import { PageHeader, Alert } from "@/components/ui";
 import { ScanUpload } from "@/components/scan-upload";
 
 export default async function ScanPage() {
-  const user = await requirePage(canEnterRecords);
+  const user = await requireMethodPage("photo");
   const [pending, providers] = await Promise.all([
     prisma.scanSheet.findMany({
       where: { status: "PENDING_REVIEW", ...(isAdmin(user) ? {} : { uploadedById: user.id }) },

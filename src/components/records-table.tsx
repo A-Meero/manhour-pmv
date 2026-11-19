@@ -248,6 +248,8 @@ function EditRecord({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const set = (patch: Partial<typeof form>) => setForm({ ...form, ...patch });
+  /** QR records are the sum of their work sessions: their hours, dates, employee and card come from the sessions. */
+  const fromQr = record.source === "QR";
 
   async function save() {
     setBusy(true);
@@ -265,10 +267,16 @@ function EditRecord({
   return (
     <Modal title="Edit record" onClose={onClose} wide>
       <div className="space-y-3">
+        {fromQr && (
+          <Alert kind="info">
+            This record adds up QR scans. To change its hours or dates, correct the sessions on the{" "}
+            <a className="underline" href={`/sessions?show=all&jobCard=${encodeURIComponent(record.jobCard)}`}>Work Sessions</a> page.
+          </Alert>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="label">Employee</label>
-            <select className="input" value={form.employeeId} onChange={(e) => set({ employeeId: e.target.value })}>
+            <select className="input" value={form.employeeId} disabled={fromQr} onChange={(e) => set({ employeeId: e.target.value })}>
               {employees.map((employee) => (
                 <option key={employee.id} value={employee.id}>{employee.fileNo} – {employee.name}</option>
               ))}
@@ -276,19 +284,19 @@ function EditRecord({
           </div>
           <div>
             <label className="label">Job card</label>
-            <JobCardInput value={form.jobCardCode} onChange={(value) => set({ jobCardCode: value })} />
+            {fromQr ? <input className="input font-mono" value={form.jobCardCode} disabled /> : <JobCardInput value={form.jobCardCode} onChange={(value) => set({ jobCardCode: value })} />}
           </div>
           <div>
             <label className="label">Start date</label>
-            <input type="date" className="input" value={form.startDate} onChange={(e) => set({ startDate: e.target.value })} />
+            <input type="date" className="input" value={form.startDate} disabled={fromQr} onChange={(e) => set({ startDate: e.target.value })} />
           </div>
           <div>
             <label className="label">End date</label>
-            <input type="date" className="input" value={form.endDate} onChange={(e) => set({ endDate: e.target.value })} />
+            <input type="date" className="input" value={form.endDate} disabled={fromQr} onChange={(e) => set({ endDate: e.target.value })} />
           </div>
           <div>
             <label className="label">Hours worked</label>
-            <input type="number" step="0.25" min="0" className="input" value={form.hours} onChange={(e) => set({ hours: e.target.value })} />
+            <input type="number" step="0.25" min="0" className="input" value={form.hours} disabled={fromQr} onChange={(e) => set({ hours: e.target.value })} />
           </div>
           <div>
             <label className="label">Remarks</label>

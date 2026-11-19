@@ -14,6 +14,7 @@ type User = {
   role: Role;
   active: boolean;
   canEnterOwnRecords: boolean;
+  isStoreManager: boolean;
   employee: { id: string; fileNo: string; name: string } | null;
   supervising: number;
 };
@@ -57,6 +58,7 @@ export function UsersManager({ users, employees, meId, q }: { users: User[]; emp
                 <td>
                   {ROLE_LABEL[user.role]}
                   {user.role === "EMPLOYEE" && user.canEnterOwnRecords && <div className="text-xs text-gray-500">Can enter own records</div>}
+                  {user.isStoreManager && <div className="text-xs font-medium text-blue-700">Store manager</div>}
                 </td>
                 <td>{user.employee ? `${user.employee.fileNo} – ${user.employee.name}` : <span className="text-gray-400">—</span>}</td>
                 <td>{user.supervising ? `${user.supervising} employee(s)` : <span className="text-gray-400">—</span>}</td>
@@ -107,6 +109,7 @@ function UserForm({
   const [active, setActive] = useState(user?.active ?? true);
   const [employeeId, setEmployeeId] = useState(user?.employee?.id ?? "");
   const [canEnterOwnRecords, setCanEnterOwnRecords] = useState(user?.canEnterOwnRecords ?? false);
+  const [isStoreManager, setIsStoreManager] = useState(user?.isStoreManager ?? false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -115,7 +118,7 @@ function UserForm({
   async function save() {
     setBusy(true);
     setError("");
-    const body = { name, email, role, active, employeeId: employeeId || null, canEnterOwnRecords, ...(password ? { password } : {}) };
+    const body = { name, email, role, active, employeeId: employeeId || null, canEnterOwnRecords, isStoreManager, ...(password ? { password } : {}) };
     try {
       if (user) await api(`/api/users/${user.id}`, { method: "PATCH", body });
       else await api("/api/users", { body });
@@ -167,7 +170,7 @@ function UserForm({
               <option key={employee.id} value={employee.id}>{employee.label}</option>
             ))}
           </select>
-          <p className="mt-1 text-xs text-gray-500">The user sees this employee&apos;s records as their own.</p>
+          <p className="mt-1 text-xs text-gray-500">The user sees this employee&apos;s records as their own, and can record time on job cards by scanning their QR codes.</p>
         </div>
         {role === "EMPLOYEE" && (
           <label className="flex items-center gap-2 text-sm">
@@ -175,6 +178,13 @@ function UserForm({
             Can enter his own records {!employeeId && <span className="text-xs text-amber-700">(needs a linked employee)</span>}
           </label>
         )}
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" className="mt-0.5" checked={isStoreManager} onChange={(e) => setIsStoreManager(e.target.checked)} />
+          <span>
+            Store manager
+            <span className="block text-xs text-gray-500">Manages the inventory and issues spare parts to job cards.</span>
+          </span>
+        </label>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} disabled={isMe} />
           Active (can sign in)

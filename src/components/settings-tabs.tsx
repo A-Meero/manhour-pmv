@@ -6,6 +6,16 @@ import { ArrowDown, ArrowUp, Copy, Plus, Trash2 } from "lucide-react";
 import { api, errorMessage } from "@/lib/client";
 import { Alert, Modal } from "@/components/ui";
 import { DEFAULT_TIMEOUT_SECONDS, PROVIDER_INFO, PROVIDER_TYPES, type ProviderType, type PublicProvider } from "@/lib/ai-provider-info";
+import { LOGGING_METHODS, LOGGING_METHOD_INFO, type LoggingMethod } from "@/lib/logging-methods";
+
+type GeneralValues = {
+  dailyHourLimit: string;
+  weeklyHourLimit: string;
+  weekStartDay: string;
+  methods: Record<LoggingMethod, boolean>;
+  maxSessionHours: string;
+  appBaseUrl: string;
+};
 
 type Field = {
   id: string;
@@ -30,7 +40,7 @@ type ApiKeyRow = {
 };
 
 const TABS = [
-  { id: "general", label: "Hours & week" },
+  { id: "general", label: "General" },
   { id: "ocr", label: "Photo reading" },
   { id: "fields", label: "Form fields" },
   { id: "api", label: "API access" },
@@ -41,7 +51,7 @@ const TYPE_LABEL = { TEXT: "Text", NUMBER: "Number", DATE: "Date", SELECT: "List
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export function SettingsTabs(props: {
-  general: { dailyHourLimit: string; weeklyHourLimit: string; weekStartDay: string };
+  general: GeneralValues;
   ocr: { providers: PublicProvider[]; tesseractLanguage: string };
   fields: Field[];
   apiKeys: ApiKeyRow[];
@@ -90,11 +100,46 @@ function useSaver() {
   return { busy, message, run, setMessage };
 }
 
-function GeneralSettings({ initial }: { initial: { dailyHourLimit: string; weeklyHourLimit: string; weekStartDay: string } }) {
+function GeneralSettings({ initial }: { initial: GeneralValues }) {
   const [values, setValues] = useState(initial);
   const { busy, message, run } = useSaver();
   return (
     <div className="card max-w-2xl space-y-4 p-5">
+      <div>
+        <h2 className="font-semibold">Ways of logging man-hours</h2>
+        <p className="mt-1 text-sm text-gray-600">
+          A way that is switched off disappears from the menu and is blocked for everyone except admins.
+        </p>
+        <div className="mt-3 space-y-2">
+          {LOGGING_METHODS.map((method) => (
+            <label key={method} className="flex items-start gap-3 rounded-lg border border-gray-200 p-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={values.methods[method]}
+                onChange={(e) => setValues({ ...values, methods: { ...values.methods, [method]: e.target.checked } })}
+              />
+              <span>
+                <span className="font-medium">{LOGGING_METHOD_INFO[method].label}</span>
+                <span className="block text-gray-500">{LOGGING_METHOD_INFO[method].description}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="grid gap-4 border-t border-gray-100 pt-4 sm:grid-cols-2">
+        <div>
+          <label className="label">Maximum QR session length (hours)</label>
+          <input className="input" type="number" step="any" min="0.5" max="72" value={values.maxSessionHours} onChange={(e) => setValues({ ...values, maxSessionHours: e.target.value })} />
+          <p className="mt-1 text-xs text-gray-500">A session still running after this is stopped automatically and flagged for review.</p>
+        </div>
+        <div>
+          <label className="label">App address for QR codes</label>
+          <input className="input" placeholder="e.g. http://192.168.1.20:3002" value={values.appBaseUrl} onChange={(e) => setValues({ ...values, appBaseUrl: e.target.value })} />
+          <p className="mt-1 text-xs text-gray-500">The address phones use to open the app. Leave empty to use the address you are using now.</p>
+        </div>
+      </div>
+      <h2 className="border-t border-gray-100 pt-4 font-semibold">Hour limits</h2>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className="label">Daily hour limit</label>

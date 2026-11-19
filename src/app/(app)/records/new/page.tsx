@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { Printer } from "lucide-react";
-import { requirePage } from "@/lib/auth/guards";
-import { canEnterRecords } from "@/lib/auth/access";
+import { requireMethodPage } from "@/lib/auth/guards";
 import { getEntryData } from "@/lib/entry-data";
 import { PageHeader } from "@/components/ui";
 import { RecordEntry } from "@/components/record-entry";
 import { getSettings } from "@/lib/settings";
+import { methodAllowed } from "@/lib/auth/access";
 
 export default async function NewRecordPage() {
-  const user = await requirePage(canEnterRecords);
+  const user = await requireMethodPage("manual");
   const [{ employees, fields }, settings] = await Promise.all([getEntryData(user), getSettings()]);
   const only = employees.length === 1 ? employees[0].id : "";
   const limits = [
@@ -23,7 +23,7 @@ export default async function NewRecordPage() {
         description={`One line per job card. A job card can be recorded once per employee.${limits.length ? ` Limits: ${limits.join(", ")}.` : ""}`}
         actions={
           <>
-            <Link href="/records/scan" className="btn">Scan a sheet instead</Link>
+            {methodAllowed(user, settings.methods, "photo") && <Link href="/records/scan" className="btn">Scan a sheet instead</Link>}
             <a href="/api/templates/sheet-pdf" target="_blank" className="btn">
               <Printer className="h-4 w-4" /> Blank sheet (PDF)
             </a>

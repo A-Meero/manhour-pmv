@@ -57,6 +57,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
           fileNo: employee.fileNo,
           name: employee.name,
           jobTitle: employee.jobTitle,
+          hourlyRate: Number(employee.hourlyRate),
           active: employee.active,
           source: employee.source,
           customFields: employee.customFields as Record<string, string | number | boolean | null>,

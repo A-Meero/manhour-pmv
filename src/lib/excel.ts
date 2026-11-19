@@ -3,7 +3,7 @@ import "server-only";
 import ExcelJS from "exceljs";
 import type { FieldDef } from "@/lib/fields";
 
-export type TemplateKind = "job-cards" | "employees" | "records";
+export type TemplateKind = "job-cards" | "employees" | "records" | "parts";
 
 type Column = { header: string; key: string; width: number; note: string; required?: boolean; format?: "date" | "number" };
 
@@ -21,6 +21,15 @@ export const STANDARD_COLUMNS: Record<TemplateKind, Column[]> = {
       width: 36,
       note: "Optional. Login emails of the supervisors (any user type). Separate several with a comma.",
     },
+    { header: "Hourly Rate", key: "hourlyRate", width: 14, note: "Optional labour cost per hour in KWD (e.g. 2.750).", format: "number" },
+  ],
+  parts: [
+    { header: "Part No.", key: "partNo", width: 20, note: "Unique part number. Existing part numbers are skipped.", required: true },
+    { header: "Part Name", key: "name", width: 34, note: "Description of the part.", required: true },
+    { header: "Unit", key: "unit", width: 10, note: "Optional, e.g. pcs, ltr, m, kg. Default pcs." },
+    { header: "Unit Cost", key: "unitCost", width: 14, note: "Cost of one unit in KWD (e.g. 1.250).", required: true, format: "number" },
+    { header: "Opening Stock", key: "qtyOnHand", width: 14, note: "Optional quantity in the store now. Default 0.", format: "number" },
+    { header: "Low Stock Level", key: "minQty", width: 16, note: "Optional. The part is highlighted when stock is at or below this.", format: "number" },
   ],
   records: [
     { header: "Employee File No.", key: "employeeFileNo", width: 20, note: "Must exist in the employee list.", required: true },
@@ -52,6 +61,12 @@ const HEADER_ALIASES: Record<string, string[]> = {
   preparedByDate: ["prepared date", "prepared by date"],
   approvedByName: ["approved by"],
   approvedByDate: ["approved date", "approved by date"],
+  hourlyRate: ["hourly rate", "rate", "rate per hour"],
+  partNo: ["part no.", "part no", "part number", "part #"],
+  unit: ["unit", "uom"],
+  unitCost: ["unit cost", "cost", "unit price", "price"],
+  qtyOnHand: ["opening stock", "quantity", "qty", "stock", "qty on hand"],
+  minQty: ["low stock level", "min qty", "minimum", "reorder level"],
 };
 
 const normalizeHeader = (value: string) => value.replace(/\*/g, "").trim().toLowerCase().replace(/\s+/g, " ");

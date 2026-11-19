@@ -94,4 +94,4 @@ export function StatusBadge({ active }: { active: boolean }) {
   );
 }
 
-export const SOURCE_LABEL: Record<string, string> = { MANUAL: "Manual", EXCEL: "Excel", API: "API", PHOTO: "Photo" };
+export const SOURCE_LABEL: Record<string, string> = { MANUAL: "Manual", EXCEL: "Excel", API: "API", PHOTO: "Photo", QR: "QR scan" };

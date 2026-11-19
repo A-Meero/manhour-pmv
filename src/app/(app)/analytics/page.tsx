@@ -6,6 +6,7 @@ import { getAnalytics } from "@/lib/analytics";
 import { getSettings } from "@/lib/settings";
 import { addDays, formatDate, parseDate, todayUtc, toIsoDate, weekStart } from "@/lib/dates";
 import { PageHeader } from "@/components/ui";
+import { formatMoney } from "@/lib/money";
 import { BarList, ColumnChart } from "@/components/charts";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -47,6 +48,9 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     { label: "Employees", value: fmt(data.totals.employees) },
     { label: "Job cards", value: fmt(data.totals.jobCards) },
     { label: "Avg hours / employee", value: fmt(data.totals.avgPerEmployee) },
+    { label: "Labour cost", value: formatMoney(data.totals.labourCost) },
+    { label: "Parts cost", value: employeeId ? "–" : formatMoney(data.totals.partsCost) },
+    { label: "Total cost", value: formatMoney(data.totals.labourCost + (employeeId ? 0 : data.totals.partsCost)) },
   ];
 
   return (
@@ -75,7 +79,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         ))}
       </div>
 
-      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
         {tiles.map((tile) => (
           <div key={tile.label} className="card p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{tile.label}</p>
@@ -153,6 +157,9 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
                 <th className="text-right">Employees</th>
                 <th className="text-right">Records</th>
                 <th className="text-right">Hours in period</th>
+                <th className="text-right">Labour</th>
+                <th className="text-right">Parts</th>
+                <th className="text-right">Total cost</th>
               </tr>
             </thead>
             <tbody>
@@ -164,6 +171,9 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
                   <td className="text-right">{card.employees}</td>
                   <td className="text-right">{card.records}</td>
                   <td className="text-right font-semibold">{fmt(card.hours)}</td>
+                  <td className="text-right">{formatMoney(card.labourCost, false)}</td>
+                  <td className="text-right">{formatMoney(card.partsCost, false)}</td>
+                  <td className="text-right font-semibold">{formatMoney(card.labourCost + card.partsCost, false)}</td>
                 </tr>
               ))}
             </tbody>

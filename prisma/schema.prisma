@@ -17,6 +17,20 @@ enum DataSource {
   EXCEL
   API
   PHOTO
+  /// Start/stop scans of the job card QR code
+  QR
+}
+
+enum JobCardStatus {
+  OPEN
+  CLOSED
+}
+
+enum StockMovementKind {
+  RECEIVE
+  ADJUST
+  ISSUE
+  ISSUE_REVERSAL
 }
 
 enum FieldEntity {
@@ -37,6 +51,7 @@ enum ImportKind {
   JOB_CARDS
   EMPLOYEES
   RECORDS
+  PARTS
 }
 
 enum ScanStatus {
@@ -46,28 +61,34 @@ enum ScanStatus {
 }
 
 model User {
-  id                 String   @id @default(cuid())
+  id                 String    @id @default(cuid())
   name               String
-  email              String   @unique
+  email              String    @unique
   passwordHash       String
   role               UserRole
-  active             Boolean  @default(true)
+  active             Boolean   @default(true)
   /// Employee record this login belongs to (used by EMPLOYEE users)
-  employeeId         String?  @unique
+  employeeId         String?   @unique
   employee           Employee? @relation("UserEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
   /// Employee users marked with this flag may enter their own man-hour records
-  canEnterOwnRecords Boolean  @default(false)
-  sessionVersion     Int      @default(0)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  canEnterOwnRecords Boolean   @default(false)
+  /// Store managers issue spare parts to job cards and manage the inventory
+  isStoreManager     Boolean   @default(false)
+  sessionVersion     Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  supervising     EmployeeSupervisor[]
-  recordsCreated  ManHourRecord[]      @relation("RecordCreatedBy")
-  recordsUpdated  ManHourRecord[]      @relation("RecordUpdatedBy")
-  scans           ScanSheet[]
-  importBatches   ImportBatch[]
-  auditLogs       AuditLog[]
-  apiKeysCreated  ApiKey[]
+  supervising    EmployeeSupervisor[]
+  recordsCreated ManHourRecord[]      @relation("RecordCreatedBy")
+  recordsUpdated ManHourRecord[]      @relation("RecordUpdatedBy")
+  scans          ScanSheet[]
+  importBatches  ImportBatch[]
+  auditLogs      AuditLog[]
+  apiKeysCreated ApiKey[]
+  jobCardsClosed JobCard[]            @relation("JobCardClosedBy")
+  workSessions   WorkSession[]        @relation("SessionUser")
+  sessionsEdited WorkSession[]        @relation("SessionEditedBy")
+  stockMovements StockMovement[]
 }
 
 model Employee {
@@ -75,15 +96,18 @@ model Employee {
   fileNo       String     @unique
   name         String
   jobTitle     String     @default("")
+  /// Labour cost per hour (KWD)
+  hourlyRate   Decimal    @default(0) @db.Decimal(10, 3)
   active       Boolean    @default(true)
   customFields Json       @default("{}")
   source       DataSource @default(MANUAL)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  user        User?                @relation("UserEmployee")
-  supervisors EmployeeSupervisor[]
-  records     ManHourRecord[]
+  user         User?                @relation("UserEmployee")
+  supervisors  EmployeeSupervisor[]
+  records      ManHourRecord[]
+  workSessions WorkSession[]
 
   @@index([name])
 }
@@ -101,15 +125,24 @@ model EmployeeSupervisor {
 }
 
 model JobCard {
-  id           String     @id @default(cuid())
-  code         String     @unique
-  active       Boolean    @default(true)
-  customFields Json       @default("{}")
-  source       DataSource @default(MANUAL)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id           String        @id @default(cuid())
+  code         String        @unique
+  active       Boolean       @default(true)
+  /// Closed cards take no more QR sessions, part issues or (non-admin) records
+  status       JobCardStatus @default(OPEN)
+  closedAt     DateTime?
+  closedById   String?
+  customFields Json          @default("{}")
+  source       DataSource    @default(MANUAL)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
-  records ManHourRecord[]
+  closedBy       User?           @relation("JobCardClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  records        ManHourRecord[]
+  workSessions   WorkSession[]
+  stockMovements StockMovement[]
+
+  @@index([status])
 }
 
 model ManHourRecord {
@@ -125,6 +158,8 @@ model ManHourRecord {
   employeeName   String     @default("")
   jobTitle       String     @default("")
   supervisorName String     @default("")
+  /// Employee's hourly rate when the record was saved (null on records from before rates existed)
+  hourlyRate     Decimal?   @db.Decimal(10, 3)
   /// "Prepared By" / "Approved By" from the sheet (names only)
   preparedByName String     @default("")
   preparedByDate DateTime?  @db.Date
@@ -149,6 +184,77 @@ model ManHourRecord {
   @@unique([employeeId, jobCardId])
   @@index([startDate])
   @@index([endDate])
+  @@index([jobCardId])
+}
+
+/// One start→stop period of a technician working on a job card (QR scans). Summed into one ManHourRecord.
+model WorkSession {
+  id          String    @id @default(cuid())
+  employeeId  String
+  jobCardId   String
+  /// Login that scanned
+  userId      String?
+  startedAt   DateTime
+  /// null while the technician is still working
+  endedAt     DateTime?
+  /// Stopped by the system after the maximum session length
+  autoStopped Boolean   @default(false)
+  needsReview Boolean   @default(false)
+  reviewNote  String    @default("")
+  editedById  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  jobCard  JobCard  @relation(fields: [jobCardId], references: [id], onDelete: Restrict)
+  user     User?    @relation("SessionUser", fields: [userId], references: [id], onDelete: SetNull)
+  editedBy User?    @relation("SessionEditedBy", fields: [editedById], references: [id], onDelete: SetNull)
+
+  @@index([jobCardId])
+  @@index([employeeId, endedAt])
+  @@index([needsReview])
+}
+
+model Part {
+  id        String   @id @default(cuid())
+  partNo    String   @unique
+  name      String
+  unit      String   @default("pcs")
+  unitCost  Decimal  @default(0) @db.Decimal(10, 3)
+  qtyOnHand Decimal  @default(0) @db.Decimal(12, 3)
+  /// Highlight as low stock at or below this quantity
+  minQty    Decimal? @db.Decimal(12, 3)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  movements StockMovement[]
+
+  @@index([name])
+}
+
+/// Every change to a part's stock. ISSUE / ISSUE_REVERSAL rows are the parts used on a job card.
+model StockMovement {
+  id         String            @id @default(cuid())
+  partId     String
+  kind       StockMovementKind
+  /// Signed: + adds to stock, − takes from it
+  qty        Decimal           @db.Decimal(12, 3)
+  unitCost   Decimal           @db.Decimal(10, 3)
+  jobCardId  String?
+  /// For ISSUE_REVERSAL: the ISSUE it reverses
+  reversesId String?           @unique
+  note       String            @default("")
+  userId     String?
+  createdAt  DateTime          @default(now())
+
+  part     Part           @relation(fields: [partId], references: [id], onDelete: Restrict)
+  jobCard  JobCard?       @relation(fields: [jobCardId], references: [id], onDelete: Restrict)
+  user     User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  reverses StockMovement? @relation("Reversal", fields: [reversesId], references: [id], onDelete: Restrict)
+  reversal StockMovement? @relation("Reversal")
+
+  @@index([partId, createdAt])
   @@index([jobCardId])
 }
 
@@ -230,13 +336,13 @@ model ApiKey {
 }
 
 model AuditLog {
-  id         String   @id @default(cuid())
-  userId     String?
-  action     String
-  entity     String
-  entityId   String   @default("")
-  details    Json     @default("{}")
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String   @default("")
+  details   Json     @default("{}")
+  createdAt DateTime @default(now())
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
