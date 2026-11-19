@@ -43,6 +43,10 @@ export const PUT = withUser(async (request, user) => {
     const type = input.type as ProviderType;
     const name = String(input.name ?? "").trim() || PROVIDER_INFO[type].label;
     const model = String(input.model ?? "").trim();
+    // Model IDs never contain spaces; this catches plan names typed by mistake (e.g. "Free tier").
+    if (/\s/.test(model)) {
+      throw new HttpError(400, `${name}: "${model}" is not a model ID. Type the model's ID without spaces, ${PROVIDER_INFO[type].modelHint}.`);
+    }
     const baseUrl = String(input.baseUrl ?? "").trim().replace(/\/+$/, "");
     if (baseUrl) {
       let url: URL;
