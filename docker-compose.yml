@@ -1,0 +1,28 @@
+# Manhour system  ->  http://localhost:3002
+name: manhour
+
+services:
+  app:
+    build: .
+    image: manhour:latest
+    container_name: manhour
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    env_file:
+      - .env.docker
+    environment:
+      UPLOAD_DIR: /app/uploads
+      TESSDATA_DIR: /app/tessdata
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Scanned sheet photos stay in the project's uploads folder on Windows
+      - type: bind
+        source: "C:/Users/Dell/Repo/manhour-sys/manhour-system/manhour/uploads"
+        target: /app/uploads
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

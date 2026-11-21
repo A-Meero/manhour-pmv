@@ -1,15 +1,16 @@
 import { prisma } from "@/lib/prisma";
 import { requirePage } from "@/lib/auth/guards";
-import { canManageMasterData } from "@/lib/auth/access";
+import { canManageEmployees } from "@/lib/auth/access";
 import { getFieldDefinitions, toFieldDefs } from "@/lib/fields";
 import { EmployeesManager } from "@/components/employees-manager";
 import { PageHeader, Pagination } from "@/components/ui";
+import { describeShift } from "@/lib/shift-info";
 import type { ClientField } from "@/components/custom-field-inputs";
 
 const PAGE_SIZE = 50;
 
 export default async function EmployeesPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
-  await requirePage(canManageMasterData);
+  await requirePage(canManageEmployees);
   const params = await searchParams;
   const q = params.q?.trim() ?? "";
   const status = params.status ?? "all";
@@ -28,7 +29,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
     ...(status === "active" ? { active: true } : status === "inactive" ? { active: false } : {}),
     ...(supervisorId ? { supervisors: { some: { supervisorId } } } : {}),
   };
-  const [total, employees, users, fields] = await Promise.all([
+  const [total, employees, users, fields, shifts] = await Promise.all([
     prisma.employee.count({ where }),
     prisma.employee.findMany({
       where,
@@ -41,8 +42,9 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
         _count: { select: { records: true } },
       },
     }),
-    prisma.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true, email: true, role: true } }),
+    prisma.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true, email: true, isAdmin: true } }).then((list) => list.map(({ isAdmin, ...u }) => ({ ...u, role: isAdmin ? "Admin" : "" }))),
     getFieldDefinitions("EMPLOYEE"),
+    prisma.shift.findMany({ orderBy: { startTime: "asc" } }),
   ]);
 
   return (
@@ -51,6 +53,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
       <EmployeesManager
         fields={toFieldDefs(fields) as ClientField[]}
         users={users}
+        shifts={shifts.map((shift) => ({ id: shift.id, name: shift.name, detail: describeShift(shift), active: shift.active }))}
         filters={{ q, status, supervisorId }}
         employees={employees.map((employee) => ({
           id: employee.id,
@@ -58,6 +61,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
           name: employee.name,
           jobTitle: employee.jobTitle,
           hourlyRate: Number(employee.hourlyRate),
+          shiftId: employee.shiftId,
           active: employee.active,
           source: employee.source,
           customFields: employee.customFields as Record<string, string | number | boolean | null>,

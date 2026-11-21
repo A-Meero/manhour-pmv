@@ -6,12 +6,6 @@ datasource db {
   provider = "postgresql"
 }
 
-enum UserRole {
-  ADMIN
-  MANAGER
-  EMPLOYEE
-}
-
 enum DataSource {
   MANUAL
   EXCEL
@@ -52,6 +46,7 @@ enum ImportKind {
   EMPLOYEES
   RECORDS
   PARTS
+  ASSETS
 }
 
 enum ScanStatus {
@@ -65,15 +60,12 @@ model User {
   name               String
   email              String    @unique
   passwordHash       String
-  role               UserRole
+  /// Admins can do everything; everyone else gets what their permission groups allow
+  isAdmin            Boolean   @default(false)
   active             Boolean   @default(true)
-  /// Employee record this login belongs to (used by EMPLOYEE users)
+  /// Employee record this login belongs to (technicians, own-records entry)
   employeeId         String?   @unique
   employee           Employee? @relation("UserEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
-  /// Employee users marked with this flag may enter their own man-hour records
-  canEnterOwnRecords Boolean   @default(false)
-  /// Store managers issue spare parts to job cards and manage the inventory
-  isStoreManager     Boolean   @default(false)
   sessionVersion     Int       @default(0)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
@@ -89,6 +81,95 @@ model User {
   workSessions   WorkSession[]        @relation("SessionUser")
   sessionsEdited WorkSession[]        @relation("SessionEditedBy")
   stockMovements StockMovement[]
+  groups         UserGroup[]
+  notifications  Notification[]
+  jobCardsAdded  JobCard[]            @relation("JobCardAddedBy")
+}
+
+/// A named set of permissions (see src/lib/permissions.ts). Users get the union of their groups' permissions.
+model PermissionGroup {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String   @default("")
+  permissions String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members UserGroup[]
+}
+
+model UserGroup {
+  userId    String
+  groupId   String
+  createdAt DateTime @default(now())
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([userId, groupId])
+  @@index([groupId])
+}
+
+/// In-app notification. dedupeKey stops the same event being sent twice to the same user.
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  kind      String
+  title     String
+  body      String    @default("")
+  link      String    @default("")
+  dedupeKey String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt, createdAt])
+}
+
+/// Equipment / vehicle the job cards are for. "Code" on the printed job card.
+model Asset {
+  id               String    @id @default(cuid())
+  code             String    @unique
+  description      String    @default("")
+  category         String    @default("")
+  location         String    @default("")
+  make             String    @default("")
+  model            String    @default("")
+  serialNo         String    @default("")
+  chassisNo        String    @default("")
+  plateNo          String    @default("")
+  yearOfMake       Int?
+  purchaseDate     DateTime? @db.Date
+  /// KWD
+  purchaseValue    Decimal?  @db.Decimal(12, 3)
+  /// Straight-line depreciation, % of the purchase value per year
+  depreciationRate Decimal?  @db.Decimal(5, 2)
+  notes            String    @default("")
+  active           Boolean   @default(true)
+  customFields     Json      @default("{}")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  jobCards JobCard[]
+
+  @@index([plateNo])
+  @@index([chassisNo])
+  @@index([category])
+}
+
+/// A "Work Done" line printed on the job card.
+model JobCardTask {
+  id          String    @id @default(cuid())
+  jobCardId   String
+  line        Int
+  description String
+  fromDate    DateTime? @db.Date
+
+  jobCard JobCard @relation(fields: [jobCardId], references: [id], onDelete: Cascade)
+
+  @@index([jobCardId])
 }
 
 model Employee {
@@ -98,6 +179,8 @@ model Employee {
   jobTitle     String     @default("")
   /// Labour cost per hour (KWD)
   hourlyRate   Decimal    @default(0) @db.Decimal(10, 3)
+  /// Working shift; used to stop QR sessions left running after the shift and alert the supervisor
+  shiftId      String?
   active       Boolean    @default(true)
   customFields Json       @default("{}")
   source       DataSource @default(MANUAL)
@@ -105,11 +188,29 @@ model Employee {
   updatedAt    DateTime   @updatedAt
 
   user         User?                @relation("UserEmployee")
+  shift        Shift?               @relation(fields: [shiftId], references: [id], onDelete: SetNull)
   supervisors  EmployeeSupervisor[]
   records      ManHourRecord[]
   workSessions WorkSession[]
 
   @@index([name])
+  @@index([shiftId])
+}
+
+/// A working shift, e.g. Morning 07:00–15:00 Sat–Thu. endTime ≤ startTime means it ends the next day.
+model Shift {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  /// "HH:MM" in the app's time zone (Asia/Kuwait)
+  startTime String
+  endTime   String
+  /// Weekdays the shift starts on: 0 = Sunday … 6 = Saturday
+  days      Int[]    @default([])
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employees Employee[]
 }
 
 model EmployeeSupervisor {
@@ -134,15 +235,34 @@ model JobCard {
   closedById   String?
   customFields Json          @default("{}")
   source       DataSource    @default(MANUAL)
+  /// Printed header of the original job card (code above = "Rep.Order Number")
+  assetId         String?
+  dateIn          DateTime?  @db.Date
+  dateOut         DateTime?  @db.Date
+  previousReading Decimal?   @db.Decimal(12, 1)
+  currentReading  Decimal?   @db.Decimal(12, 1)
+  jobType         String     @default("")
+  repairAt        String     @default("")
+  project         String     @default("")
+  operatorName    String     @default("")
+  receivedBy      String     @default("")
+  createdByName   String     @default("")
+  /// Photo of the original card, relative to the uploads folder
+  photoPath       String     @default("")
+  addedById       String?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
+  asset          Asset?          @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  addedBy        User?           @relation("JobCardAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
   closedBy       User?           @relation("JobCardClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  tasks          JobCardTask[]
   records        ManHourRecord[]
   workSessions   WorkSession[]
   stockMovements StockMovement[]
 
   @@index([status])
+  @@index([assetId, status])
 }
 
 model ManHourRecord {
@@ -189,21 +309,29 @@ model ManHourRecord {
 
 /// One start→stop period of a technician working on a job card (QR scans). Summed into one ManHourRecord.
 model WorkSession {
-  id          String    @id @default(cuid())
-  employeeId  String
-  jobCardId   String
+  id           String    @id @default(cuid())
+  employeeId   String
+  jobCardId    String
   /// Login that scanned
-  userId      String?
-  startedAt   DateTime
+  userId       String?
+  startedAt    DateTime
   /// null while the technician is still working
-  endedAt     DateTime?
+  endedAt      DateTime?
   /// Stopped by the system after the maximum session length
-  autoStopped Boolean   @default(false)
-  needsReview Boolean   @default(false)
-  reviewNote  String    @default("")
-  editedById  String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  autoStopped  Boolean   @default(false)
+  /// Still running after the shift ended: when the technician was reminded (timer keeps going)
+  shiftReminderAt  DateTime?
+  /// Shift end of that reminder (for "I finished at shift end")
+  shiftEndAt       DateTime?
+  /// Stopped by the system when the daily / weekly limit (or max session length) was reached after the shift
+  limitStoppedAt   DateTime?
+  /// Technician's answer to the after-shift question: CONTINUE | SHIFT_END | KEEP
+  afterShiftAnswer String?
+  needsReview  Boolean   @default(false)
+  reviewNote   String    @default("")
+  editedById   String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   jobCard  JobCard  @relation(fields: [jobCardId], references: [id], onDelete: Restrict)

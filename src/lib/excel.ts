@@ -3,14 +3,45 @@ import "server-only";
 import ExcelJS from "exceljs";
 import type { FieldDef } from "@/lib/fields";
 
-export type TemplateKind = "job-cards" | "employees" | "records" | "parts";
+export type TemplateKind = "job-cards" | "employees" | "records" | "parts" | "assets";
 
 type Column = { header: string; key: string; width: number; note: string; required?: boolean; format?: "date" | "number" };
 
 const RED = "FFE3262B";
 
 export const STANDARD_COLUMNS: Record<TemplateKind, Column[]> = {
-  "job-cards": [{ header: "Job Card ID", key: "code", width: 26, note: "Unique job card ID. Existing IDs are skipped.", required: true }],
+  "job-cards": [
+    { header: "Job Card ID", key: "code", width: 18, note: "Unique job card number (Rep.Order Number on the printed card). Existing numbers are skipped.", required: true },
+    { header: "Asset Code", key: "assetCode", width: 14, note: "Optional. \"Code\" on the printed card. Must exist in Assets (or give the plate / chassis no.)." },
+    { header: "Plate No.", key: "plateNo", width: 14, note: "Optional. Used to find the asset when there is no asset code." },
+    { header: "Chassis No.", key: "chassisNo", width: 22, note: "Optional. Used to find the asset when there is no asset code or plate." },
+    { header: "Date In", key: "dateIn", width: 12, note: "Optional, DD/MM/YYYY", format: "date" },
+    { header: "Job Type", key: "jobType", width: 16, note: "Optional, e.g. Break Down, Routine Check, Traffic Passing." },
+    { header: "Previous HM/KM", key: "previousReading", width: 14, note: "Optional meter reading.", format: "number" },
+    { header: "Current HM/KM", key: "currentReading", width: 14, note: "Optional meter reading.", format: "number" },
+    { header: "Repair At", key: "repairAt", width: 22, note: "Optional." },
+    { header: "Project", key: "project", width: 24, note: "Optional." },
+    { header: "Operator Name", key: "operatorName", width: 22, note: "Optional." },
+    { header: "Received By", key: "receivedBy", width: 22, note: "Optional." },
+    { header: "Created By", key: "createdByName", width: 18, note: "Optional. As printed on the card." },
+    { header: "Work Done", key: "workDone", width: 40, note: "Optional. Task lines; separate several with a semicolon (;)." },
+  ],
+  assets: [
+    { header: "Asset Code", key: "assetCode", width: 14, note: "Unique asset code (\"Code\" on the job card, e.g. SUV172). Existing codes are skipped.", required: true },
+    { header: "Description", key: "description", width: 34, note: "e.g. MITSUBISHI PAJERO SPORT SUV" },
+    { header: "Category", key: "category", width: 16, note: "Optional, e.g. SUV, Pick Up, Dump Truck, Generator." },
+    { header: "Location / Department", key: "location", width: 22, note: "Optional." },
+    { header: "Make", key: "make", width: 14, note: "Optional." },
+    { header: "Model", key: "model", width: 16, note: "Optional." },
+    { header: "Serial No.", key: "serialNo", width: 18, note: "Optional." },
+    { header: "Chassis No.", key: "chassisNo", width: 22, note: "Optional." },
+    { header: "Plate No.", key: "plateNo", width: 14, note: "Optional, e.g. 40/37025." },
+    { header: "Year of Make", key: "yearOfMake", width: 12, note: "Optional, e.g. 2015.", format: "number" },
+    { header: "Purchase Date", key: "purchaseDate", width: 14, note: "Optional, DD/MM/YYYY. Depreciation counts from this date.", format: "date" },
+    { header: "Purchase Value", key: "purchaseValue", width: 14, note: "Optional, KWD.", format: "number" },
+    { header: "Depreciation Rate %", key: "depreciationRate", width: 16, note: "Optional. Straight line, % of the purchase value per year (e.g. 20).", format: "number" },
+    { header: "Notes", key: "notes", width: 30, note: "Optional." },
+  ],
   employees: [
     { header: "Employee File No.", key: "fileNo", width: 20, note: "Unique employee file number. Existing file numbers are skipped.", required: true },
     { header: "Employee Name", key: "name", width: 30, note: "Full name.", required: true },
@@ -22,6 +53,7 @@ export const STANDARD_COLUMNS: Record<TemplateKind, Column[]> = {
       note: "Optional. Login emails of the supervisors (any user type). Separate several with a comma.",
     },
     { header: "Hourly Rate", key: "hourlyRate", width: 14, note: "Optional labour cost per hour in KWD (e.g. 2.750).", format: "number" },
+    { header: "Shift", key: "shift", width: 16, note: "Optional. Name of a shift from Settings › Shifts (e.g. Morning)." },
   ],
   parts: [
     { header: "Part No.", key: "partNo", width: 20, note: "Unique part number. Existing part numbers are skipped.", required: true },
@@ -62,11 +94,36 @@ const HEADER_ALIASES: Record<string, string[]> = {
   approvedByName: ["approved by"],
   approvedByDate: ["approved date", "approved by date"],
   hourlyRate: ["hourly rate", "rate", "rate per hour"],
+  shift: ["shift", "shift name"],
   partNo: ["part no.", "part no", "part number", "part #"],
   unit: ["unit", "uom"],
   unitCost: ["unit cost", "cost", "unit price", "price"],
   qtyOnHand: ["opening stock", "quantity", "qty", "stock", "qty on hand"],
   minQty: ["low stock level", "min qty", "minimum", "reorder level"],
+  assetCode: ["asset code", "code", "asset", "equipment code"],
+  plateNo: ["plate no.", "plate no", "plate", "plate number"],
+  chassisNo: ["chassis no.", "chassis no", "chassis", "vin", "chass"],
+  dateIn: ["date in"],
+  jobType: ["job type"],
+  previousReading: ["previous hm/km", "previous reading", "previous km"],
+  currentReading: ["current hm/km", "current reading", "current km", "hm/km", "km"],
+  repairAt: ["repair at"],
+  project: ["project"],
+  operatorName: ["operator name", "operator"],
+  receivedBy: ["received by"],
+  createdByName: ["created by"],
+  workDone: ["work done", "tasks", "task description"],
+  description: ["description", "asset description", "name"],
+  category: ["category", "type", "asset type"],
+  location: ["location / department", "location", "department"],
+  make: ["make", "manufacturer"],
+  model: ["model"],
+  serialNo: ["serial no.", "serial no", "serial number", "serial"],
+  yearOfMake: ["year of make", "yom", "year"],
+  purchaseDate: ["purchase date"],
+  purchaseValue: ["purchase value", "purchase price", "value"],
+  depreciationRate: ["depreciation rate %", "depreciation rate", "depreciation %", "depreciation"],
+  notes: ["notes", "note"],
 };
 
 const normalizeHeader = (value: string) => value.replace(/\*/g, "").trim().toLowerCase().replace(/\s+/g, " ");

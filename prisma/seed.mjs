@@ -18,7 +18,7 @@ async function main() {
     console.log(`User ${email} already exists - nothing changed.`);
     return;
   }
-  await prisma.user.create({ data: { email, name, role: "ADMIN", passwordHash: await bcrypt.hash(password, 10) } });
+  await prisma.user.create({ data: { email, name, isAdmin: true, passwordHash: await bcrypt.hash(password, 10) } });
   console.log(`Admin ${email} created. Remove ADMIN_PASSWORD from .env now.`);
 }
 

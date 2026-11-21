@@ -1,5 +1,5 @@
 import { requireMethodPage } from "@/lib/auth/guards";
-import { isManagerOrAdmin } from "@/lib/auth/access";
+import { canEnterOwn, getEntryScope } from "@/lib/auth/access";
 import { PageHeader } from "@/components/ui";
 import { RecordsImport } from "@/components/records-import";
 
@@ -12,7 +12,7 @@ export default async function ImportRecordsPage() {
         <ul className="list-disc space-y-1 pl-5 text-sm text-gray-600">
           <li>Download the template and fill the <b>Data</b> sheet (one row per employee + job card).</li>
           <li>Employees and job cards must already exist. A job card can be recorded once per employee.</li>
-          {!isManagerOrAdmin(user) && <li>You can only import records for the employees you supervise{user.canEnterOwnRecords ? " and yourself" : ""}.</li>}
+          {getEntryScope(user) !== "ALL" && <li>You can only import records for {user.supervisedEmployeeIds.length ? `the employees you supervise${canEnterOwn(user) ? " and yourself" : ""}` : "yourself"}.</li>}
           <li>Valid rows are imported; you get a report of the invalid ones.</li>
         </ul>
         <RecordsImport />

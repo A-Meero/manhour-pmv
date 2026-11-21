@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { canManageMasterData } from "@/lib/auth/access";
+import { canManageSettings } from "@/lib/auth/access";
 import { HttpError, readJson, withUser } from "@/lib/http";
 import { loadProviders, notReadyReason, resolve } from "@/lib/ai-providers";
 import { testProvider } from "@/lib/ai-vision";
@@ -21,4 +21,4 @@ export const POST = withUser(async (request) => {
     ok: true,
     message: `${provider.name} is connected (${provider.model}).${provider.enabled ? "" : " It is disabled, so it won't be used until you enable it."}`,
   });
-}, canManageMasterData);
+}, canManageSettings);

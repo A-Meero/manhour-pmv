@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { FieldEntity, FieldType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { canManageMasterData } from "@/lib/auth/access";
+import { canManageSettings } from "@/lib/auth/access";
 import { HttpError, readJson, withUser } from "@/lib/http";
 import { slugifyKey } from "@/lib/fields";
 import { audit } from "@/lib/audit";
@@ -29,4 +29,4 @@ export const POST = withUser(async (request, user) => {
   });
   await audit(user.id, "FIELD_CREATED", "FieldDefinition", field.id, { entity: field.entity, label });
   return NextResponse.json({ id: field.id });
-}, canManageMasterData);
+}, canManageSettings);

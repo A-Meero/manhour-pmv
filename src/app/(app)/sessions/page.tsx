@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requirePage } from "@/lib/auth/guards";
-import { canReviewSessions, isManagerOrAdmin, methodAllowed } from "@/lib/auth/access";
+import { canReviewSessions, methodAllowed, reviewsAllSessions } from "@/lib/auth/access";
 import { getSettings } from "@/lib/settings";
 import { autoStopStale, reviewScopeWhere } from "@/lib/work-sessions";
 import { sessionInclude, toSessionRows } from "@/lib/job-card-view";
@@ -38,7 +38,7 @@ export default async function SessionsPage({ searchParams }: { searchParams: Pro
   const [sessions, employees, counts] = await Promise.all([
     prisma.workSession.findMany({ where, include: sessionInclude, orderBy: [{ needsReview: "desc" }, { startedAt: "desc" }], take: 500 }),
     prisma.employee.findMany({
-      where: isManagerOrAdmin(user) ? { workSessions: { some: {} } } : { id: { in: user.supervisedEmployeeIds } },
+      where: reviewsAllSessions(user) ? { workSessions: { some: {} } } : { id: { in: user.supervisedEmployeeIds } },
       select: { id: true, fileNo: true, name: true },
       orderBy: { name: "asc" },
     }),
@@ -50,7 +50,7 @@ export default async function SessionsPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader
         title="Work sessions"
-        description={`QR start/stop sessions${isManagerOrAdmin(user) ? "" : " of the employees you supervise"}. Correct the times of auto-stopped sessions; the man-hour records update by themselves.${flagged ? ` ${flagged} session(s) need review.` : ""}`}
+        description={`QR start/stop sessions${reviewsAllSessions(user) ? "" : " of the employees you supervise"}. Correct the times of auto-stopped sessions; the man-hour records update by themselves.${flagged ? ` ${flagged} session(s) need review.` : ""}`}
       />
       {!methodAllowed(user, methods, "qr") && <p className="mb-3 text-sm text-amber-700">Job card QR time tracking is switched off.</p>}
       <form className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-6" action="/sessions">

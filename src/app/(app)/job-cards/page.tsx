@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requirePage } from "@/lib/auth/guards";
-import { canBrowseJobCards, canManageMasterData } from "@/lib/auth/access";
+import { canAddJobCards, canBrowseJobCards, canEditJobCards } from "@/lib/auth/access";
+import { toIsoDate } from "@/lib/dates";
 import { getFieldDefinitions, toFieldDefs } from "@/lib/fields";
 import { JobCardsManager } from "@/components/job-cards-manager";
 import { PageHeader, Pagination } from "@/components/ui";
@@ -15,7 +16,7 @@ export default async function JobCardsPage({ searchParams }: { searchParams: Pro
   const status = params.status ?? "all";
   const page = Math.max(1, Number(params.page) || 1);
   const where = {
-    ...(q ? { code: { contains: q, mode: "insensitive" as const } } : {}),
+    ...(q ? { OR: [{ code: { contains: q, mode: "insensitive" as const } }, { asset: { code: { contains: q, mode: "insensitive" as const } } }] } : {}),
     ...(status === "active" ? { active: true } : status === "inactive" ? { active: false } : {}),
     ...(status === "open" ? { status: "OPEN" as const, active: true } : status === "closed" ? { status: "CLOSED" as const } : {}),
   };
@@ -26,7 +27,10 @@ export default async function JobCardsPage({ searchParams }: { searchParams: Pro
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
-      include: { _count: { select: { records: true, workSessions: true, stockMovements: true } } },
+      include: {
+        _count: { select: { records: true, workSessions: true, stockMovements: true } },
+        asset: { select: { id: true, code: true, description: true } },
+      },
     }),
     getFieldDefinitions("JOB_CARD"),
   ]);
@@ -35,10 +39,11 @@ export default async function JobCardsPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader
         title="Job Cards"
-        description="Job card IDs that man-hour records can be booked against. Each ID is unique. Open a card for its QR code, work sessions, parts and cost."
+        description="Job cards from the workshop system. Each number is unique and each asset has at most one open card. Open a card for its details, QR code, work sessions, parts and cost."
       />
       <JobCardsManager
-        canManage={canManageMasterData(user)}
+        canAdd={canAddJobCards(user)}
+        canEdit={canEditJobCards(user)}
         fields={toFieldDefs(fields) as ClientField[]}
         filters={{ q, status }}
         cards={cards.map((card) => ({
@@ -50,6 +55,9 @@ export default async function JobCardsPage({ searchParams }: { searchParams: Pro
           source: card.source,
           customFields: card.customFields as Record<string, string | number | boolean | null>,
           records: card._count.records,
+          asset: card.asset,
+          dateIn: card.dateIn ? toIsoDate(card.dateIn) : null,
+          jobType: card.jobType,
           inUse: card._count.records + card._count.workSessions + card._count.stockMovements,
           createdAt: card.createdAt.toISOString(),
         }))}

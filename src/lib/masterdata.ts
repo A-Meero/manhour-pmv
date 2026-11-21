@@ -52,65 +52,6 @@ export async function saveImportBatch(
   return batch.id;
 }
 
-export type JobCardInput = { row: number; code: unknown; fields?: Record<string, unknown> };
-
-/** Creates job cards. Existing IDs (and repeats inside the same batch) are skipped, never updated. */
-export async function importJobCards(items: JobCardInput[], meta: BatchMeta, recordBatch = true): Promise<ImportSummary> {
-  const fieldDefs = toFieldDefs(await getFieldDefinitions("JOB_CARD"));
-  const issues: ImportIssue[] = [];
-  const codes = items.map((item) => normalizeCode(item.code));
-  const existing = new Set(
-    (await prisma.jobCard.findMany({ where: { code: { in: codes.filter(Boolean) } }, select: { code: true } })).map(
-      (card) => card.code,
-    ),
-  );
-  const seen = new Set<string>();
-  const toCreate: Prisma.JobCardCreateManyInput[] = [];
-
-  items.forEach((item, index) => {
-    const code = codes[index];
-    if (!code) {
-      issues.push({ row: item.row, value: "", reason: "Job card ID is empty", status: "failed" });
-      return;
-    }
-    if (code.length > 100) {
-      issues.push({ row: item.row, value: code, reason: "Job card ID is longer than 100 characters", status: "failed" });
-      return;
-    }
-    if (existing.has(code)) {
-      issues.push({ row: item.row, value: code, reason: "Job card ID already exists", status: "skipped" });
-      return;
-    }
-    if (seen.has(code)) {
-      issues.push({ row: item.row, value: code, reason: "Repeated in this import", status: "skipped" });
-      return;
-    }
-    const { values, errors } = validateCustomFields(fieldDefs, item.fields);
-    if (errors.length) {
-      issues.push({ row: item.row, value: code, reason: errors.join("; "), status: "failed" });
-      return;
-    }
-    seen.add(code);
-    toCreate.push({ code, customFields: values, source: meta.source });
-  });
-
-  let created = 0;
-  if (toCreate.length) {
-    const result = await prisma.jobCard.createMany({ data: toCreate, skipDuplicates: true });
-    created = result.count;
-  }
-
-  const summary = {
-    totalRows: items.length,
-    created,
-    skipped: issues.filter((issue) => issue.status === "skipped").length + (toCreate.length - created),
-    failed: issues.filter((issue) => issue.status === "failed").length,
-    issues,
-  };
-  const batchId = recordBatch ? await saveImportBatch("JOB_CARDS", meta, summary) : null;
-  return { batchId, ...summary };
-}
-
 export type EmployeeInput = {
   row: number;
   fileNo: unknown;
@@ -120,6 +61,8 @@ export type EmployeeInput = {
   supervisors?: unknown;
   /** KWD per hour; empty = 0 */
   hourlyRate?: unknown;
+  /** Shift name from Settings › Shifts */
+  shift?: unknown;
   fields?: Record<string, unknown>;
 };
 
@@ -141,6 +84,7 @@ export function splitList(value: unknown): string[] {
 /** Creates employees. Existing file numbers (and repeats in the batch) are skipped, never updated. */
 export async function importEmployees(items: EmployeeInput[], meta: BatchMeta, recordBatch = true): Promise<ImportSummary> {
   const fieldDefs = toFieldDefs(await getFieldDefinitions("EMPLOYEE"));
+  const shiftByName = new Map((await prisma.shift.findMany({ select: { id: true, name: true } })).map((s) => [s.name.toLowerCase(), s.id]));
   const issues: ImportIssue[] = [];
   const fileNos = items.map((item) => normalizeCode(item.fileNo));
   const existing = new Set(
@@ -177,6 +121,8 @@ export async function importEmployees(items: EmployeeInput[], meta: BatchMeta, r
     if (!name) errors.push("Employee name is required");
     const hourlyRate = parseAmount(item.hourlyRate);
     if (hourlyRate === null || (hourlyRate !== undefined && (hourlyRate < 0 || hourlyRate > 9999999))) errors.push("Hourly rate must be a number of 0 or more");
+    const shiftName = String(item.shift ?? "").trim();
+    if (shiftName && !shiftByName.has(shiftName.toLowerCase())) errors.push(`Shift "${shiftName}" not found (see Settings › Shifts)`);
     const supervisorIds: string[] = [];
     for (const email of splitList(item.supervisors)) {
       const id = userByEmail.get(email.toLowerCase());
@@ -197,6 +143,7 @@ export async function importEmployees(items: EmployeeInput[], meta: BatchMeta, r
           name,
           jobTitle,
           hourlyRate: hourlyRate ?? 0,
+          shiftId: shiftName ? (shiftByName.get(shiftName.toLowerCase()) ?? null) : null,
           customFields: custom.values,
           source: meta.source,
           supervisors: { create: supervisorIds.map((supervisorId) => ({ supervisorId })) },

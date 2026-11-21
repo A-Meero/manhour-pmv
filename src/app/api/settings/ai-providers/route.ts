@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { canManageMasterData } from "@/lib/auth/access";
+import { canManageSettings } from "@/lib/auth/access";
 import { HttpError, readJson, withUser } from "@/lib/http";
 import { audit } from "@/lib/audit";
 import {
@@ -90,4 +90,4 @@ export const PUT = withUser(async (request, user) => {
     })),
   });
   return NextResponse.json({ providers: next.map(toPublic) });
-}, canManageMasterData);
+}, canManageSettings);

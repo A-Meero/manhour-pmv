@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { canViewCosts, getViewScope } from "@/lib/auth/access";
+import { canSearchPeople, canViewCosts, getViewScope } from "@/lib/auth/access";
 import { round3 } from "@/lib/money";
 import { withUser } from "@/lib/http";
 import { buildRecordWhere, readFilters, recordInclude } from "@/lib/record-query";
@@ -10,7 +10,7 @@ import { getFieldDefinitions } from "@/lib/fields";
 
 export const GET = withUser(async (request, user) => {
   const filters = readFilters(new URL(request.url).searchParams);
-  const where = buildRecordWhere(filters, getViewScope(user));
+  const where = buildRecordWhere(filters, getViewScope(user), canSearchPeople(user));
   const [records, fields] = await Promise.all([
     prisma.manHourRecord.findMany({ where, include: recordInclude, orderBy: [{ startDate: "desc" }, { createdAt: "desc" }], take: 100000 }),
     getFieldDefinitions("RECORD", true),

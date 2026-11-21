@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.env
+.env.*
+!.env.example
+uploads
+tmp
+*.dump
+*.zip
+Dockerfile.bak
+docker-compose.yml
+npm-debug.log*
+*.tsbuildinfo

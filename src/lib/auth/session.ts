@@ -3,7 +3,7 @@ import "server-only";
 import { createHmac, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import type { NextResponse } from "next/server";
-import type { UserRole } from "@prisma/client";
+import { PERMISSION_KEYS, type Permission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { appConfig } from "@/lib/env";
 
@@ -16,11 +16,13 @@ export type CurrentUser = {
   id: string;
   name: string;
   email: string;
-  role: UserRole;
+  /** Admins can do everything */
+  isAdmin: boolean;
+  /** Union of the user's permission groups (all permissions for admins) */
+  permissions: Set<Permission>;
+  /** Names of the user's permission groups (for display) */
+  groupNames: string[];
   employeeId: string | null;
-  canEnterOwnRecords: boolean;
-  /** Issues spare parts and manages the inventory */
-  isStoreManager: boolean;
   /** Employees this user is assigned to supervise */
   supervisedEmployeeIds: string[];
 };
@@ -88,11 +90,10 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       id: true,
       name: true,
       email: true,
-      role: true,
+      isAdmin: true,
       active: true,
       employeeId: true,
-      canEnterOwnRecords: true,
-      isStoreManager: true,
+      groups: { select: { group: { select: { name: true, permissions: true } } } },
       sessionVersion: true,
       supervising: { select: { employeeId: true } },
     },
@@ -104,10 +105,12 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     id: user.id,
     name: user.name,
     email: user.email,
-    role: user.role,
+    isAdmin: user.isAdmin,
+    permissions: user.isAdmin
+      ? new Set(PERMISSION_KEYS)
+      : new Set(user.groups.flatMap((g) => g.group.permissions).filter((p): p is Permission => (PERMISSION_KEYS as string[]).includes(p))),
+    groupNames: user.groups.map((g) => g.group.name).sort(),
     employeeId: user.employeeId,
-    canEnterOwnRecords: user.canEnterOwnRecords,
-    isStoreManager: user.isStoreManager,
     supervisedEmployeeIds: user.supervising.map((entry) => entry.employeeId),
   };
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { canManageMasterData } from "@/lib/auth/access";
+import { canManageSettings } from "@/lib/auth/access";
 import { HttpError, readJson, withUser } from "@/lib/http";
 import { saveSettings } from "@/lib/settings";
 import { audit } from "@/lib/audit";
@@ -13,6 +13,8 @@ type Body = {
   methods?: Partial<Record<LoggingMethod, boolean>>;
   maxSessionHours?: string;
   appBaseUrl?: string;
+  shiftAlerts?: boolean;
+  shiftGraceMinutes?: string;
 };
 
 function limit(value: string | undefined, label: string) {
@@ -61,7 +63,15 @@ export const PUT = withUser(async (request, user) => {
     }
     values.appBaseUrl = address;
   }
+  if (body.shiftAlerts !== undefined) values.shiftAlerts = body.shiftAlerts ? "on" : "off";
+  if (body.shiftGraceMinutes !== undefined) {
+    const minutes = Number(String(body.shiftGraceMinutes).trim());
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 240) {
+      throw new HttpError(400, "Grace period must be a whole number of minutes between 0 and 240.");
+    }
+    values.shiftGraceMinutes = String(minutes);
+  }
   await saveSettings(values);
   await audit(user.id, "SETTINGS_UPDATED", "Setting", "", values);
   return NextResponse.json({ ok: true });
-}, canManageMasterData);
+}, canManageSettings);

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth/guards";
-import { canDeleteRecords, canEditRecords, getViewScope, employeeScopeWhere } from "@/lib/auth/access";
+import { canDeleteRecords, canEditRecords, canSearchPeople, getViewScope, employeeScopeWhere } from "@/lib/auth/access";
 import { buildRecordWhere, readFilters, recordInclude } from "@/lib/record-query";
 import { getFieldDefinitions, toFieldDefs } from "@/lib/fields";
 import { toIsoDate } from "@/lib/dates";
@@ -14,7 +14,9 @@ export default async function RecordsPage({ searchParams }: { searchParams: Prom
   const user = await requireUser();
   const filters = readFilters(await searchParams);
   const scope = getViewScope(user);
-  const where = buildRecordWhere(filters, scope);
+  const searchPeople = canSearchPeople(user);
+  if (!searchPeople) filters.employeeId = "";
+  const where = buildRecordWhere(filters, scope, searchPeople);
 
   const [total, sum, records, employees, fields] = await Promise.all([
     prisma.manHourRecord.count({ where }),
@@ -26,11 +28,14 @@ export default async function RecordsPage({ searchParams }: { searchParams: Prom
       skip: (filters.page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
-    prisma.employee.findMany({
-      where: employeeScopeWhere(scope),
-      orderBy: { name: "asc" },
-      select: { id: true, fileNo: true, name: true },
-    }),
+    // Normal employees get no list of people (the edit form, the only other user, is for managers).
+    searchPeople
+      ? prisma.employee.findMany({
+          where: employeeScopeWhere(scope),
+          orderBy: { name: "asc" },
+          select: { id: true, fileNo: true, name: true },
+        })
+      : Promise.resolve([]),
     getFieldDefinitions("RECORD"),
   ]);
 
@@ -45,8 +50,12 @@ export default async function RecordsPage({ searchParams }: { searchParams: Prom
 
   return (
     <>
-      <PageHeader title="Man-hour records" description={scope === "ALL" ? "All records." : "Records of the employees you supervise and your own."} />
+      <PageHeader
+        title="Man-hour records"
+        description={scope === "ALL" ? "All records." : searchPeople ? "Records of the employees you supervise and your own." : "Your own records."}
+      />
       <RecordsTable
+        canSearchPeople={searchPeople}
         filters={params}
         employees={employees}
         fields={toFieldDefs(fields) as ClientField[]}

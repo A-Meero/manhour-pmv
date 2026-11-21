@@ -7,6 +7,8 @@ import { getSettings } from "@/lib/settings";
 import { autoStopStale, sessionHours } from "@/lib/work-sessions";
 import { addDays, formatDateTime, formatTime } from "@/lib/dates";
 import { Alert, PageHeader } from "@/components/ui";
+import { ScanLine } from "lucide-react";
+import { describeShift } from "@/lib/shift-info";
 
 const fmt = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
@@ -23,6 +25,8 @@ export default async function MyWorkPage() {
     orderBy: { startedAt: "desc" },
     take: 300,
   });
+  const employee = await prisma.employee.findUnique({ where: { id: user.employeeId }, select: { shift: true } });
+  const shift = employee?.shift?.active ? employee.shift : null;
   const running = sessions.find((s) => !s.endedAt);
   const byCard = new Map<string, { code: string; status: string; hours: number; sessions: number }>();
   for (const s of sessions) {
@@ -35,8 +39,22 @@ export default async function MyWorkPage() {
 
   return (
     <>
-      <PageHeader title="My work" description="Scan a job card's QR code with your phone camera to start or stop work on it." />
+      <PageHeader
+        title="My work"
+        description="Scan a job card's QR code to start or stop work on it, with your phone camera or the Scan button."
+        actions={
+          <Link href="/scan" className="btn btn-primary">
+            <ScanLine className="h-4 w-4" /> Scan job card
+          </Link>
+        }
+      />
       <div className="space-y-5">
+        {shift && (
+          <p className="text-sm text-gray-600">
+            Your shift: <b>{shift.name}</b> · {describeShift(shift)}.
+            {settings.shiftAlerts && " Stop work before your shift ends, or it is stopped for you and your supervisor is told."}
+          </p>
+        )}
         {running ? (
           <div className="card flex flex-col gap-3 border-green-300 bg-green-50 p-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm">

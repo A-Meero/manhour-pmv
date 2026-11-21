@@ -3,7 +3,7 @@ import "server-only";
 import { Prisma, type DataSource } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { CurrentUser } from "@/lib/auth/session";
-import { getEntryScope, isAdmin, methodAllowed, scopeAllows } from "@/lib/auth/access";
+import { getEntryScope, getViewScope, isAdmin, methodAllowed, scopeAllows } from "@/lib/auth/access";
 import { HttpError } from "@/lib/http";
 import { LOGGING_METHOD_INFO, METHOD_FOR_SOURCE } from "@/lib/logging-methods";
 import { getSettings, type AppSettings } from "@/lib/settings";
@@ -338,6 +338,10 @@ export type RecordUpdate = {
 export async function updateRecord(id: string, update: RecordUpdate, actor: CurrentUser): Promise<string[] | null> {
   const current = await prisma.manHourRecord.findUnique({ where: { id }, include: { jobCard: true } });
   if (!current) return ["Record not found"];
+  // "Edit records" covers the records the user can see, and moving a record only to someone they can see.
+  const visible = getViewScope(actor);
+  if (!scopeAllows(visible, current.employeeId)) return ["Record not found"];
+  if (update.employeeId !== undefined && !scopeAllows(visible, update.employeeId)) return ["You can only move records to employees you can see"];
   if (current.source === "QR") {
     const locked = ["employeeId", "jobCardCode", "startDate", "endDate", "hours"] as const;
     const changed = locked.filter((key) => {

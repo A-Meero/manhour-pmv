@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { canManageMasterData } from "@/lib/auth/access";
+import { canManageEmployees } from "@/lib/auth/access";
 import { HttpError, readJson, withUser } from "@/lib/http";
 import { normalizeCode, parseAmount } from "@/lib/masterdata";
 import { getFieldDefinitions, toFieldDefs, validateCustomFields } from "@/lib/fields";
 import { audit } from "@/lib/audit";
+import { readShiftId } from "@/lib/shift-body";
 
 type Ctx = { params: Promise<{ id: string }> };
 type EmployeeBody = {
@@ -13,6 +14,7 @@ type EmployeeBody = {
   name?: string;
   jobTitle?: string;
   hourlyRate?: string | number;
+  shiftId?: string | null;
   active?: boolean;
   supervisorIds?: string[];
   customFields?: Record<string, unknown>;
@@ -34,6 +36,7 @@ export const PATCH = withUser<Ctx>(async (request, user, { params }) => {
 
   const hourlyRate = body.hourlyRate !== undefined ? parseAmount(body.hourlyRate) : undefined;
   if (hourlyRate === null || (hourlyRate !== undefined && hourlyRate < 0)) throw new HttpError(400, "Hourly rate must be a number of 0 or more.");
+  const shiftId = await readShiftId(body.shiftId);
   let customFields = existing.customFields as Record<string, unknown>;
   if (body.customFields) {
     const custom = validateCustomFields(toFieldDefs(await getFieldDefinitions("EMPLOYEE")), body.customFields);
@@ -49,6 +52,7 @@ export const PATCH = withUser<Ctx>(async (request, user, { params }) => {
         name,
         jobTitle: body.jobTitle !== undefined ? body.jobTitle.trim() : existing.jobTitle,
         ...(body.hourlyRate !== undefined ? { hourlyRate: hourlyRate ?? 0 } : {}),
+        ...(shiftId !== undefined ? { shiftId } : {}),
         active: body.active ?? existing.active,
         customFields: customFields as Prisma.InputJsonValue,
       },
@@ -65,7 +69,7 @@ export const PATCH = withUser<Ctx>(async (request, user, { params }) => {
   });
   await audit(user.id, "EMPLOYEE_UPDATED", "Employee", id, body);
   return NextResponse.json({ ok: true });
-}, canManageMasterData);
+}, canManageEmployees);
 
 export const DELETE = withUser<Ctx>(async (_request, user, { params }) => {
   const { id } = await params;
@@ -77,4 +81,4 @@ export const DELETE = withUser<Ctx>(async (_request, user, { params }) => {
   await prisma.employee.delete({ where: { id } });
   await audit(user.id, "EMPLOYEE_DELETED", "Employee", id);
   return NextResponse.json({ ok: true });
-}, canManageMasterData);
+}, canManageEmployees);

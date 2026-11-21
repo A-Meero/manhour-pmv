@@ -7,6 +7,8 @@ import { isAdmin } from "@/lib/auth/access";
 import { HttpError } from "@/lib/http";
 import { normalizeCode, parseAmount, saveImportBatch, type ImportIssue, type ImportSummary } from "@/lib/masterdata";
 import { audit } from "@/lib/audit";
+import { notify, usersWithPermission } from "@/lib/notifications";
+import { formatQty } from "@/lib/money";
 
 /**
  * Simple stock: each part has a quantity on hand and a unit cost. Every change is a StockMovement:
@@ -89,6 +91,7 @@ export async function changeStock(
   body: { kind?: string; qty?: unknown; countedQty?: unknown; unitCost?: unknown; note?: unknown },
 ) {
   const note = String(body.note ?? "").trim();
+  let lowStock = null as LowStock | null;
   const result = await prisma.$transaction(async (tx) => {
     const part = await lockPart(tx, partId);
     if (body.kind === "RECEIVE") {
@@ -107,11 +110,42 @@ export async function changeStock(
       if (Math.abs(diff) < 0.0005) throw new HttpError(400, "The counted quantity is the same as the stock on hand.");
       if (!note) throw new HttpError(400, "Write a reason for the adjustment.");
       await tx.part.update({ where: { id: partId }, data: { qtyOnHand: new Prisma.Decimal(counted) } });
-      return tx.stockMovement.create({ data: { partId, kind: "ADJUST", qty: new Prisma.Decimal(diff), unitCost: part.unitCost, note, userId: user.id } });
+      const movement = await tx.stockMovement.create({ data: { partId, kind: "ADJUST", qty: new Prisma.Decimal(diff), unitCost: part.unitCost, note, userId: user.id } });
+      lowStock = crossedMinimum(part, counted, movement.id);
+      return movement;
     }
     throw new HttpError(400, "Unknown stock change.");
   });
   await audit(user.id, `STOCK_${result.kind}`, "Part", partId, { qty: Number(result.qty), note });
+  if (lowStock) await notifyLowStock([lowStock]);
+}
+
+type LowStock = { id: string; partNo: string; name: string; unit: string; qty: number; min: number; movementId: string };
+
+/** The part just went from above its low-stock level to at or below it. */
+function crossedMinimum(part: { id: string; partNo: string; name: string; unit: string; qtyOnHand: Prisma.Decimal; minQty: Prisma.Decimal | null }, after: number, movementId: string): LowStock | null {
+  if (part.minQty === null) return null;
+  const min = Number(part.minQty);
+  if (Number(part.qtyOnHand) <= min || after > min) return null;
+  return { id: part.id, partNo: part.partNo, name: part.name, unit: part.unit, qty: after, min, movementId };
+}
+
+/** Tells store managers (and admins) that parts are running low. One notification per crossing. */
+async function notifyLowStock(parts: LowStock[]) {
+  try {
+    const userIds = await usersWithPermission("inventory.manage");
+    for (const part of parts) {
+      await notify(userIds, {
+        kind: "LOW_STOCK",
+        title: `Low stock: ${part.partNo} ${part.name}`,
+        body: `${formatQty(part.qty)} ${part.unit} left (low-stock level ${formatQty(part.min)}).`,
+        link: `/inventory/${part.id}`,
+        dedupeKey: `low-stock:${part.movementId}`,
+      });
+    }
+  } catch (error) {
+    console.warn("[inventory] low-stock notification failed", error);
+  }
 }
 
 async function lockPart(tx: Prisma.TransactionClient, partId: string) {
@@ -136,6 +170,7 @@ export async function issueParts(user: CurrentUser, jobCardId: string, lines: { 
     merged.set(line.partId, (merged.get(line.partId) ?? 0) + line.qty);
   }
   const text = String(note ?? "").trim();
+  const low: LowStock[] = [];
   const issued = await prisma.$transaction(async (tx) => {
     const out: { partNo: string; qty: number }[] = [];
     // Lock in a fixed order so two issues at once can't deadlock.
@@ -146,14 +181,17 @@ export async function issueParts(user: CurrentUser, jobCardId: string, lines: { 
         throw new HttpError(400, `Not enough ${part.partNo} (${part.name}) in stock: ${Number(part.qtyOnHand)} ${part.unit} left.`);
       }
       await tx.part.update({ where: { id: partId }, data: { qtyOnHand: { decrement: qty } } });
-      await tx.stockMovement.create({
+      const movement = await tx.stockMovement.create({
         data: { partId, kind: "ISSUE", qty: new Prisma.Decimal(-qty), unitCost: part.unitCost, jobCardId, note: text, userId: user.id },
       });
+      const crossed = crossedMinimum(part, Number(part.qtyOnHand) - qty, movement.id);
+      if (crossed) low.push(crossed);
       out.push({ partNo: part.partNo, qty });
     }
     return out;
   });
   await audit(user.id, "PARTS_ISSUED", "JobCard", jobCardId, { code: card.code, parts: issued });
+  if (low.length) await notifyLowStock(low);
   return issued;
 }
 

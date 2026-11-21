@@ -35,6 +35,9 @@ type SessionWithNames = {
   startedAt: Date;
   endedAt: Date | null;
   autoStopped: boolean;
+  shiftReminderAt: Date | null;
+  limitStoppedAt: Date | null;
+  afterShiftAnswer: string | null;
   needsReview: boolean;
   reviewNote: string;
   employee: { fileNo: string; name: string };
@@ -59,6 +62,8 @@ export function toSessionRows(user: CurrentUser, sessions: SessionWithNames[]): 
     endedAt: s.endedAt?.toISOString() ?? null,
     hours: Math.round(sessionHours(s.startedAt, s.endedAt) * 100) / 100,
     autoStopped: s.autoStopped,
+    afterShift: s.limitStoppedAt ? "limit" : s.shiftReminderAt ? "reminded" : null,
+    afterShiftAnswer: s.afterShiftAnswer,
     needsReview: s.needsReview,
     reviewNote: s.reviewNote,
     editedBy: s.editedBy?.name ?? "",

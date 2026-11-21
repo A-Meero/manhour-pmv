@@ -38,7 +38,7 @@ export function SupervisorPicker({ users, value, onChange }: { users: PickUser[]
               onChange={(e) => onChange(e.target.checked ? [...value, user.id] : value.filter((id) => id !== user.id))}
             />
             <span className="flex-1">{user.name}</span>
-            <span className="text-xs text-gray-500">{user.role.toLowerCase()}</span>
+            <span className="text-xs text-gray-500">{user.role}</span>
           </label>
         ))}
       </div>

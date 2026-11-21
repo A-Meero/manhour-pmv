@@ -3,12 +3,13 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { CurrentUser } from "@/lib/auth/session";
-import { canScanTime, isManagerOrAdmin } from "@/lib/auth/access";
+import { canScanTime, reviewsAllSessions } from "@/lib/auth/access";
 import { HttpError } from "@/lib/http";
 import { getSettings, type AppSettings } from "@/lib/settings";
 import { addDays, formatDate, localDay, spreadHours, toIsoDate, weekStart } from "@/lib/dates";
 import { employeeInclude, supervisorNames } from "@/lib/records";
 import { audit } from "@/lib/audit";
+import { notify, supervisorsOrAdmins } from "@/lib/notifications";
 
 /**
  * QR time tracking. A technician scans a job card's QR code to start and stop work. Each start→stop is a WorkSession;
@@ -25,7 +26,7 @@ export const sessionHours = (startedAt: Date, endedAt: Date | null, now = new Da
 type Tx = Prisma.TransactionClient;
 
 /** Serialises session changes per employee so two quick taps can't open two sessions. */
-async function lockEmployee(tx: Tx, employeeId: string) {
+export async function lockEmployee(tx: Tx, employeeId: string) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`work-session:${employeeId}`}))`;
 }
 
@@ -77,41 +78,75 @@ export async function rollUpRecord(tx: Tx, employeeId: string, jobCardId: string
   });
 }
 
-/** Flags the session for review when the employee's day or week now goes over the limits from Settings. */
-async function flagIfOverLimit(tx: Tx, sessionId: string, employeeId: string, startedAt: Date, settings: AppSettings) {
-  const { dailyHourLimit, weeklyHourLimit, weekStartDay } = settings;
-  if (dailyHourLimit === null && weeklyHourLimit === null) return;
-  const day = localDay(startedAt);
+/**
+ * The employee's hours on a day and in its week (Settings week start): finished sessions counted on the day they
+ * started, plus records entered other ways spread over their days. Optionally leaves one session out.
+ */
+export async function employeeLoad(tx: Tx | typeof prisma, employeeId: string, day: Date, weekStartDay: number, excludeSessionId?: string) {
   const from = weekStart(day, weekStartDay);
   const to = addDays(from, 6);
   const load = new Map<string, number>();
   const add = (key: string, hours: number) => load.set(key, (load.get(key) ?? 0) + hours);
-
-  // Clock time from sessions (counted on the day they started) …
   const sessions = await tx.workSession.findMany({
-    where: { employeeId, endedAt: { not: null }, startedAt: { gte: addDays(from, -1), lt: addDays(to, 2) } },
+    where: {
+      employeeId,
+      endedAt: { not: null },
+      startedAt: { gte: addDays(from, -1), lt: addDays(to, 2) },
+      ...(excludeSessionId ? { id: { not: excludeSessionId } } : {}),
+    },
     select: { startedAt: true, endedAt: true },
   });
   for (const s of sessions) add(toIsoDate(localDay(s.startedAt)), sessionHours(s.startedAt, s.endedAt));
-  // … plus records entered other ways, spread evenly over their days.
   const records = await tx.manHourRecord.findMany({
     where: { employeeId, source: { not: "QR" }, startDate: { lte: to }, endDate: { gte: from } },
     select: { startDate: true, endDate: true, hours: true },
   });
   for (const r of records) for (const part of spreadHours(r.startDate, r.endDate, Number(r.hours))) add(toIsoDate(part.day), part.hours);
+  let week = 0;
+  for (let offset = 0; offset < 7; offset += 1) week += load.get(toIsoDate(addDays(from, offset))) ?? 0;
+  return { day: load.get(toIsoDate(day)) ?? 0, week };
+}
 
+/** Flags the session for review when the employee's day or week now goes over the limits from Settings. Returns true when flagged. */
+async function flagIfOverLimit(tx: Tx, sessionId: string, employeeId: string, startedAt: Date, settings: AppSettings) {
+  const { dailyHourLimit, weeklyHourLimit, weekStartDay } = settings;
+  if (dailyHourLimit === null && weeklyHourLimit === null) return false;
+  const day = localDay(startedAt);
+  const totals = await employeeLoad(tx, employeeId, day, weekStartDay);
   const notes: string[] = [];
-  const dayTotal = load.get(toIsoDate(day)) ?? 0;
-  if (dailyHourLimit !== null && dayTotal > dailyHourLimit + 0.001) {
-    notes.push(`Daily limit of ${dailyHourLimit}h exceeded on ${formatDate(day)} (${round2(dayTotal)}h)`);
+  if (dailyHourLimit !== null && totals.day > dailyHourLimit + 0.001) {
+    notes.push(`Daily limit of ${dailyHourLimit}h exceeded on ${formatDate(day)} (${round2(totals.day)}h)`);
   }
-  if (weeklyHourLimit !== null) {
-    let weekTotal = 0;
-    for (let offset = 0; offset < 7; offset += 1) weekTotal += load.get(toIsoDate(addDays(from, offset))) ?? 0;
-    if (weekTotal > weeklyHourLimit + 0.001) notes.push(`Weekly limit of ${weeklyHourLimit}h exceeded (${round2(weekTotal)}h)`);
+  if (weeklyHourLimit !== null && totals.week > weeklyHourLimit + 0.001) {
+    notes.push(`Weekly limit of ${weeklyHourLimit}h exceeded (${round2(totals.week)}h)`);
   }
   if (notes.length) {
     await tx.workSession.update({ where: { id: sessionId }, data: { needsReview: true, reviewNote: notes.join("; ") } });
+  }
+  return notes.length > 0;
+}
+
+/** Tells the employee's supervisors (admins if none) that a session needs review. Once per session. */
+export async function notifyReview(sessionId: string) {
+  try {
+    const session = await prisma.workSession.findUnique({
+      where: { id: sessionId },
+      include: { employee: { select: { name: true, fileNo: true } }, jobCard: { select: { code: true } } },
+    });
+    if (!session?.needsReview) return;
+    const recipients = await supervisorsOrAdmins(session.employeeId);
+    await notify(
+      recipients.map((r) => r.id),
+      {
+        kind: "SESSION_REVIEW",
+        title: `Session to review: ${session.employee.name} on ${session.jobCard.code}`,
+        body: session.reviewNote,
+        link: "/sessions?show=review",
+        dedupeKey: `session-review:${session.id}`,
+      },
+    );
+  } catch (error) {
+    console.warn("[work-sessions] review notification failed", error);
   }
 }
 
@@ -120,7 +155,8 @@ export async function autoStopStale(filter: Prisma.WorkSessionWhereInput = {}) {
   const settings = await getSettings();
   const maxMs = settings.maxSessionHours * HOUR_MS;
   const stale = await prisma.workSession.findMany({
-    where: { ...filter, endedAt: null, startedAt: { lt: new Date(Date.now() - maxMs) } },
+    // Sessions reminded after the shift are stopped by the shift check (src/lib/shifts.ts) at the hour limits.
+    where: { ...filter, endedAt: null, shiftReminderAt: null, startedAt: { lt: new Date(Date.now() - maxMs) } },
     select: { id: true, employeeId: true, jobCardId: true, startedAt: true },
   });
   for (const session of stale) {
@@ -137,6 +173,7 @@ export async function autoStopStale(filter: Prisma.WorkSessionWhereInput = {}) {
       });
       if (updated.count) await rollUpRecord(tx, session.employeeId, session.jobCardId, null);
     });
+    await notifyReview(session.id);
   }
   return stale.length;
 }
@@ -173,15 +210,17 @@ export async function startSession(user: CurrentUser, jobCardId: string) {
     const open = await tx.workSession.findFirst({ where: { employeeId, endedAt: null }, include: { jobCard: { select: { code: true } } } });
     if (open && open.jobCardId === jobCardId) return { session: open, stoppedOther: "" };
     let stoppedOther = "";
+    let flaggedId = "";
     if (open) {
       await tx.workSession.update({ where: { id: open.id }, data: { endedAt: new Date() } });
       await rollUpRecord(tx, employeeId, open.jobCardId, user.id);
-      await flagIfOverLimit(tx, open.id, employeeId, open.startedAt, settings);
+      if (await flagIfOverLimit(tx, open.id, employeeId, open.startedAt, settings)) flaggedId = open.id;
       stoppedOther = open.jobCard.code;
     }
     const session = await tx.workSession.create({ data: { employeeId, jobCardId, userId: user.id, startedAt: new Date() } });
-    return { session, stoppedOther };
+    return { session, stoppedOther, flaggedId };
   });
+  if (result.flaggedId) await notifyReview(result.flaggedId);
   await audit(user.id, "WORK_STARTED", "WorkSession", result.session.id, { jobCard: jobCard.code, stoppedOther: result.stoppedOther });
   return result;
 }
@@ -198,9 +237,10 @@ export async function stopSession(user: CurrentUser, jobCardId: string) {
     if (!open) throw new HttpError(400, "You have no running work on this job card. It may have been stopped automatically.");
     const stopped = await tx.workSession.update({ where: { id: open.id }, data: { endedAt: new Date() } });
     await rollUpRecord(tx, employeeId, jobCardId, user.id);
-    await flagIfOverLimit(tx, open.id, employeeId, open.startedAt, settings);
-    return stopped;
+    const flagged = await flagIfOverLimit(tx, open.id, employeeId, open.startedAt, settings);
+    return { ...stopped, flagged };
   });
+  if (session.flagged) await notifyReview(session.id);
   await audit(user.id, "WORK_STOPPED", "WorkSession", session.id, { hours: round2(sessionHours(session.startedAt, session.endedAt)) });
   return session;
 }
@@ -221,13 +261,13 @@ export async function stopAllOnCard(tx: Tx, jobCardId: string, actorId: string) 
 
 // ---------- review & corrections ----------
 
-/** Admins/managers: every employee. Supervisors: their employees. */
+/** "Review all work sessions": every employee. Supervisors: their employees. */
 export function canFixSessionsOf(user: CurrentUser, employeeId: string) {
-  return isManagerOrAdmin(user) || user.supervisedEmployeeIds.includes(employeeId);
+  return reviewsAllSessions(user) || user.supervisedEmployeeIds.includes(employeeId);
 }
 
 export function reviewScopeWhere(user: CurrentUser): Prisma.WorkSessionWhereInput {
-  return isManagerOrAdmin(user) ? {} : { employeeId: { in: user.supervisedEmployeeIds } };
+  return reviewsAllSessions(user) ? {} : { employeeId: { in: user.supervisedEmployeeIds } };
 }
 
 function parseMoment(value: unknown, label: string): Date {
@@ -350,4 +390,62 @@ export async function approveSession(user: CurrentUser, id: string) {
   if (!current.endedAt) throw new HttpError(400, "This session is still running.");
   await prisma.workSession.update({ where: { id }, data: { needsReview: false, editedById: user.id } });
   await audit(user.id, "WORK_SESSION_APPROVED", "WorkSession", id);
+}
+
+// ---------- after the shift ----------
+
+export type AfterShiftAnswer = "CONTINUE" | "SHIFT_END" | "KEEP";
+
+/** The technician's unanswered after-shift session on this card: still running past the shift, or stopped at a limit. */
+export function pendingAfterShift(employeeId: string, jobCardId: string) {
+  return prisma.workSession.findFirst({
+    where: { employeeId, jobCardId, shiftReminderAt: { not: null }, afterShiftAnswer: null, OR: [{ endedAt: null }, { limitStoppedAt: { not: null } }] },
+    orderBy: { startedAt: "desc" },
+    select: { id: true, startedAt: true, endedAt: true, shiftEndAt: true, limitStoppedAt: true },
+  });
+}
+
+/**
+ * "Continue working" (still running) · "I finished at shift end" (end time set to the shift end) ·
+ * "I worked until the limit" (stopped at the limit: kept, stays flagged for the supervisor).
+ */
+export async function answerAfterShift(user: CurrentUser, jobCardId: string, answer: AfterShiftAnswer) {
+  if (!user.employeeId) throw new HttpError(400, "Your login is not linked to an employee record.");
+  const employeeId = user.employeeId;
+  const result = await prisma.$transaction(async (tx) => {
+    await lockEmployee(tx, employeeId);
+    const session = await tx.workSession.findFirst({
+      where: { employeeId, jobCardId, shiftReminderAt: { not: null }, afterShiftAnswer: null, OR: [{ endedAt: null }, { limitStoppedAt: { not: null } }] },
+      orderBy: { startedAt: "desc" },
+    });
+    if (!session) throw new HttpError(400, "There is nothing to answer on this job card any more.");
+    const running = !session.endedAt;
+    if (answer === "CONTINUE") {
+      if (!running) throw new HttpError(400, "This work was already stopped at the hour limit.");
+      return tx.workSession.update({ where: { id: session.id }, data: { afterShiftAnswer: "CONTINUE" } });
+    }
+    if (answer === "KEEP") {
+      if (running) throw new HttpError(400, "This work is still running.");
+      return tx.workSession.update({
+        where: { id: session.id },
+        data: { afterShiftAnswer: "KEEP", reviewNote: `${session.reviewNote} The technician says they worked until then.`.trim() },
+      });
+    }
+    // SHIFT_END: the technician finished when the shift ended and forgot to stop.
+    const end = session.shiftEndAt && session.shiftEndAt > session.startedAt ? session.shiftEndAt : session.startedAt;
+    const updated = await tx.workSession.update({
+      where: { id: session.id },
+      data: {
+        endedAt: end,
+        afterShiftAnswer: "SHIFT_END",
+        needsReview: false,
+        autoStopped: false,
+        reviewNote: "Technician: finished at the shift end and forgot to stop.",
+      },
+    });
+    await rollUpRecord(tx, employeeId, jobCardId, user.id);
+    return updated;
+  });
+  await audit(user.id, "AFTER_SHIFT_ANSWER", "WorkSession", result.id, { answer, endedAt: result.endedAt });
+  return result;
 }

@@ -40,6 +40,7 @@ export function RecordsTable({
   filters,
   canEdit,
   canDelete,
+  canSearchPeople,
   total,
   totalHours,
 }: {
@@ -49,6 +50,8 @@ export function RecordsTable({
   filters: Filters;
   canEdit: boolean;
   canDelete: boolean;
+  /** Admins, managers and supervisors; normal employees only see and search their own records */
+  canSearchPeople: boolean;
   total: number;
   totalHours: number;
 }) {
@@ -70,13 +73,19 @@ export function RecordsTable({
   return (
     <div className="space-y-4">
       <form action="/records" className="card grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-6">
-        <input name="q" defaultValue={filters.q} placeholder="Search name, file no., job card, remarks" className="input lg:col-span-2" />
-        <select name="employeeId" defaultValue={filters.employeeId} className="input">
-          <option value="">All employees</option>
-          {employees.map((employee) => (
-            <option key={employee.id} value={employee.id}>{employee.fileNo} – {employee.name}</option>
-          ))}
-        </select>
+        {canSearchPeople ? (
+          <>
+            <input name="q" defaultValue={filters.q} placeholder="Search name, file no., job card, remarks" className="input lg:col-span-2" />
+            <select name="employeeId" defaultValue={filters.employeeId} className="input">
+              <option value="">All employees</option>
+              {employees.map((employee) => (
+                <option key={employee.id} value={employee.id}>{employee.fileNo} – {employee.name}</option>
+              ))}
+            </select>
+          </>
+        ) : (
+          <input name="q" defaultValue={filters.q} placeholder="Search job card or remarks" className="input lg:col-span-3" />
+        )}
         <input name="jobCard" defaultValue={filters.jobCard} placeholder="Job card" className="input" />
         <select name="source" defaultValue={filters.source} className="input">
           <option value="">All sources</option>

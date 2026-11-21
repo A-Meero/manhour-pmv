@@ -6,23 +6,35 @@ import { Pencil, Plus } from "lucide-react";
 import { api, errorMessage } from "@/lib/client";
 import { Alert, Modal, StatusBadge } from "@/components/ui";
 
-type Role = "ADMIN" | "MANAGER" | "EMPLOYEE";
 type User = {
   id: string;
   name: string;
   email: string;
-  role: Role;
+  isAdmin: boolean;
   active: boolean;
-  canEnterOwnRecords: boolean;
-  isStoreManager: boolean;
+  groupIds: string[];
   employee: { id: string; fileNo: string; name: string } | null;
   supervising: number;
 };
 type EmployeeOption = { id: string; label: string; linkedUserId: string | null };
+type Group = { id: string; name: string; description: string };
 
-const ROLE_LABEL: Record<Role, string> = { ADMIN: "Admin", MANAGER: "Manager", EMPLOYEE: "Employee" };
-
-export function UsersManager({ users, employees, meId, q }: { users: User[]; employees: EmployeeOption[]; meId: string; q: string }) {
+export function UsersManager({
+  users,
+  employees,
+  groups,
+  meId,
+  meIsAdmin,
+  q,
+}: {
+  users: User[];
+  employees: EmployeeOption[];
+  groups: Group[];
+  meId: string;
+  meIsAdmin: boolean;
+  q: string;
+}) {
+  const groupName = new Map(groups.map((g) => [g.id, g.name]));
   const router = useRouter();
   const [editing, setEditing] = useState<User | "new" | null>(null);
 
@@ -43,7 +55,7 @@ export function UsersManager({ users, employees, meId, q }: { users: User[]; emp
             <tr>
               <th>Name</th>
               <th>Email</th>
-              <th>User type</th>
+              <th>Access</th>
               <th>Linked employee</th>
               <th>Supervises</th>
               <th>Status</th>
@@ -56,9 +68,17 @@ export function UsersManager({ users, employees, meId, q }: { users: User[]; emp
                 <td className="font-medium">{user.name}</td>
                 <td>{user.email}</td>
                 <td>
-                  {ROLE_LABEL[user.role]}
-                  {user.role === "EMPLOYEE" && user.canEnterOwnRecords && <div className="text-xs text-gray-500">Can enter own records</div>}
-                  {user.isStoreManager && <div className="text-xs font-medium text-blue-700">Store manager</div>}
+                  {user.isAdmin ? (
+                    <span className="font-medium text-blue-700">Admin</span>
+                  ) : user.groupIds.length ? (
+                    <div className="flex flex-wrap gap-1">
+                      {user.groupIds.map((id) => (
+                        <span key={id} className="rounded bg-gray-100 px-1.5 py-0.5 text-xs">{groupName.get(id) ?? "?"}</span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-500">No groups (own records only)</span>
+                  )}
                 </td>
                 <td>{user.employee ? `${user.employee.fileNo} – ${user.employee.name}` : <span className="text-gray-400">—</span>}</td>
                 <td>{user.supervising ? `${user.supervising} employee(s)` : <span className="text-gray-400">—</span>}</td>
@@ -66,7 +86,7 @@ export function UsersManager({ users, employees, meId, q }: { users: User[]; emp
                   <StatusBadge active={user.active} />
                 </td>
                 <td className="text-right">
-                  <button className="btn btn-sm" onClick={() => setEditing(user)}>
+                  <button className="btn btn-sm" onClick={() => setEditing(user)} disabled={user.isAdmin && !meIsAdmin} title={user.isAdmin && !meIsAdmin ? "Only admins can change an admin" : undefined}>
                     <Pencil className="h-3.5 w-3.5" /> Edit
                   </button>
                 </td>
@@ -75,11 +95,13 @@ export function UsersManager({ users, employees, meId, q }: { users: User[]; emp
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-gray-500">Supervisors are assigned on the Employees page.</p>
+      <p className="text-xs text-gray-500">Supervisors are assigned on the Employees page. What each group allows is set on the Permissions page.</p>
       {editing && (
         <UserForm
           user={editing === "new" ? null : editing}
           employees={employees}
+          groups={groups}
+          meIsAdmin={meIsAdmin}
           isMe={editing !== "new" && editing.id === meId}
           onClose={() => setEditing(null)}
           onSaved={() => router.refresh()}
@@ -92,24 +114,27 @@ export function UsersManager({ users, employees, meId, q }: { users: User[]; emp
 function UserForm({
   user,
   employees,
+  groups,
+  meIsAdmin,
   isMe,
   onClose,
   onSaved,
 }: {
   user: User | null;
   employees: EmployeeOption[];
+  groups: Group[];
+  meIsAdmin: boolean;
   isMe: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [name, setName] = useState(user?.name ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
-  const [role, setRole] = useState<Role>(user?.role ?? "EMPLOYEE");
+  const [isAdmin, setIsAdmin] = useState(user?.isAdmin ?? false);
+  const [groupIds, setGroupIds] = useState<string[]>(user?.groupIds ?? []);
   const [password, setPassword] = useState("");
   const [active, setActive] = useState(user?.active ?? true);
   const [employeeId, setEmployeeId] = useState(user?.employee?.id ?? "");
-  const [canEnterOwnRecords, setCanEnterOwnRecords] = useState(user?.canEnterOwnRecords ?? false);
-  const [isStoreManager, setIsStoreManager] = useState(user?.isStoreManager ?? false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -118,7 +143,7 @@ function UserForm({
   async function save() {
     setBusy(true);
     setError("");
-    const body = { name, email, role, active, employeeId: employeeId || null, canEnterOwnRecords, isStoreManager, ...(password ? { password } : {}) };
+    const body = { name, email, active, employeeId: employeeId || null, groupIds, ...(meIsAdmin ? { isAdmin } : {}), ...(password ? { password } : {}) };
     try {
       if (user) await api(`/api/users/${user.id}`, { method: "PATCH", body });
       else await api("/api/users", { body });
@@ -141,15 +166,7 @@ function UserForm({
           <label className="label">Email (login) *</label>
           <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="label">User type *</label>
-            <select className="input" value={role} onChange={(e) => setRole(e.target.value as Role)} disabled={isMe}>
-              <option value="ADMIN">Admin</option>
-              <option value="MANAGER">Manager</option>
-              <option value="EMPLOYEE">Employee</option>
-            </select>
-          </div>
+        <div>
           <div>
             <label className="label">{user ? "New password" : "Password *"}</label>
             <input
@@ -172,19 +189,37 @@ function UserForm({
           </select>
           <p className="mt-1 text-xs text-gray-500">The user sees this employee&apos;s records as their own, and can record time on job cards by scanning their QR codes.</p>
         </div>
-        {role === "EMPLOYEE" && (
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={canEnterOwnRecords} onChange={(e) => setCanEnterOwnRecords(e.target.checked)} />
-            Can enter his own records {!employeeId && <span className="text-xs text-amber-700">(needs a linked employee)</span>}
+        {meIsAdmin && (
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-0.5" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} disabled={isMe} />
+            <span>
+              Admin
+              <span className="block text-xs text-gray-500">Full access to everything, including Settings and Permissions.</span>
+            </span>
           </label>
         )}
-        <label className="flex items-start gap-2 text-sm">
-          <input type="checkbox" className="mt-0.5" checked={isStoreManager} onChange={(e) => setIsStoreManager(e.target.checked)} />
-          <span>
-            Store manager
-            <span className="block text-xs text-gray-500">Manages the inventory and issues spare parts to job cards.</span>
-          </span>
-        </label>
+        {!isAdmin && (
+          <div>
+            <span className="label">Permission groups</span>
+            {groups.length === 0 && <p className="text-xs text-gray-500">No groups yet. Create them on the Permissions page.</p>}
+            <div className="space-y-1.5">
+              {groups.map((group) => (
+                <label key={group.id} className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={groupIds.includes(group.id)}
+                    onChange={(e) => setGroupIds((ids) => (e.target.checked ? [...ids, group.id] : ids.filter((id) => id !== group.id)))}
+                  />
+                  <span>
+                    {group.name}
+                    {group.description && <span className="block text-xs text-gray-500">{group.description}</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} disabled={isMe} />
           Active (can sign in)

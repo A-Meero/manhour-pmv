@@ -9,12 +9,15 @@ import { ImportPanel } from "@/components/import-panel";
 import { CustomFieldInputs, formatFieldValue, type ClientField, type FieldValues } from "@/components/custom-field-inputs";
 import { SupervisorPicker, type PickUser } from "@/components/supervisor-picker";
 
+type ShiftOption = { id: string; name: string; detail: string; active: boolean };
+
 type Employee = {
   id: string;
   fileNo: string;
   name: string;
   jobTitle: string;
   hourlyRate: number;
+  shiftId: string | null;
   active: boolean;
   source: string;
   customFields: FieldValues;
@@ -26,11 +29,13 @@ type Employee = {
 export function EmployeesManager({
   employees,
   users,
+  shifts,
   fields,
   filters,
 }: {
   employees: Employee[];
   users: PickUser[];
+  shifts: ShiftOption[];
   fields: ClientField[];
   filters: { q: string; status: string; supervisorId: string };
 }) {
@@ -97,6 +102,7 @@ export function EmployeesManager({
               <th>Name</th>
               <th>Job Title</th>
               <th className="text-right">Rate / h</th>
+              <th>Shift</th>
               <th>Supervisors</th>
               {fields.map((field) => (
                 <th key={field.id}>{field.label}</th>
@@ -109,7 +115,7 @@ export function EmployeesManager({
           <tbody>
             {employees.length === 0 && (
               <tr>
-                <td colSpan={8 + fields.length} className="py-8 text-center text-gray-500">No employees found.</td>
+                <td colSpan={9 + fields.length} className="py-8 text-center text-gray-500">No employees found.</td>
               </tr>
             )}
             {employees.map((employee) => (
@@ -121,6 +127,12 @@ export function EmployeesManager({
                 </td>
                 <td>{employee.jobTitle}</td>
                 <td className="text-right">{employee.hourlyRate ? employee.hourlyRate.toFixed(3) : <span className="text-gray-400">—</span>}</td>
+                <td className="whitespace-nowrap">
+                  {(() => {
+                    const shift = shifts.find((s) => s.id === employee.shiftId);
+                    return shift ? <span title={shift.detail}>{shift.name}</span> : <span className="text-gray-400">—</span>;
+                  })()}
+                </td>
                 <td>{employee.supervisors.map((s) => s.name).join(", ") || <span className="text-gray-400">—</span>}</td>
                 {fields.map((field) => (
                   <td key={field.id}>{formatFieldValue(field, employee.customFields[field.key])}</td>
@@ -165,6 +177,7 @@ export function EmployeesManager({
         <EmployeeForm
           employee={editing === "new" ? null : editing}
           users={users}
+          shifts={shifts}
           fields={fields}
           onClose={() => setEditing(null)}
           onSaved={() => router.refresh()}
@@ -177,12 +190,14 @@ export function EmployeesManager({
 function EmployeeForm({
   employee,
   users,
+  shifts,
   fields,
   onClose,
   onSaved,
 }: {
   employee: Employee | null;
   users: PickUser[];
+  shifts: ShiftOption[];
   fields: ClientField[];
   onClose: () => void;
   onSaved: () => void;
@@ -191,6 +206,7 @@ function EmployeeForm({
   const [name, setName] = useState(employee?.name ?? "");
   const [jobTitle, setJobTitle] = useState(employee?.jobTitle ?? "");
   const [hourlyRate, setHourlyRate] = useState(employee?.hourlyRate ? String(employee.hourlyRate) : "");
+  const [shiftId, setShiftId] = useState(employee?.shiftId ?? "");
   const [supervisorIds, setSupervisorIds] = useState<string[]>(employee?.supervisors.map((s) => s.id) ?? []);
   const [values, setValues] = useState<FieldValues>(employee?.customFields ?? {});
   const [busy, setBusy] = useState(false);
@@ -199,7 +215,7 @@ function EmployeeForm({
   async function save() {
     setBusy(true);
     setError("");
-    const body = { fileNo, name, jobTitle, hourlyRate, supervisorIds, customFields: values };
+    const body = { fileNo, name, jobTitle, hourlyRate, shiftId: shiftId || null, supervisorIds, customFields: values };
     try {
       if (employee) await api(`/api/employees/${employee.id}`, { method: "PATCH", body });
       else await api("/api/employees", { body });
@@ -230,6 +246,16 @@ function EmployeeForm({
           <div>
             <label className="label">Hourly rate (KWD)</label>
             <input className="input" type="number" min="0" step="0.001" value={hourlyRate} onChange={(e) => setHourlyRate(e.target.value)} placeholder="0.000" />
+          </div>
+          <div className="sm:col-span-3">
+            <label className="label">Shift</label>
+            <select className="input" value={shiftId} onChange={(e) => setShiftId(e.target.value)}>
+              <option value="">— No shift —</option>
+              {shifts.map((shift) => (
+                <option key={shift.id} value={shift.id}>{shift.name} · {shift.detail}{shift.active ? "" : " (inactive)"}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">Used to stop QR work left running after the shift and to alert the supervisor. Shifts are set up in Settings › Shifts.</p>
           </div>
         </div>
         <div>

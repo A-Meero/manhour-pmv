@@ -6,7 +6,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { canBrowseJobCards, canManageInventory, canScanTime, isAdmin } from "@/lib/auth/access";
 import { getSettings } from "@/lib/settings";
 import { normalizeCode } from "@/lib/masterdata";
-import { autoStopStale, sessionHours, startBlocker } from "@/lib/work-sessions";
+import { autoStopStale, pendingAfterShift, sessionHours, startBlocker } from "@/lib/work-sessions";
 import { canCloseCard } from "@/lib/job-cards";
 import { issuedLines, myTimeOnCard } from "@/lib/job-card-view";
 import { formatDateTime, formatTime } from "@/lib/dates";
@@ -51,7 +51,7 @@ export default async function JobCardScanPage({
     redirect(`/login?next=${encodeURIComponent(`/jc/${code}`)}`);
   }
 
-  const card = await prisma.jobCard.findUnique({ where: { code } });
+  const card = await prisma.jobCard.findUnique({ where: { code }, include: { asset: { select: { code: true, description: true } } } });
   if (!card) {
     return (
       <Shell userName={user.name}>
@@ -66,7 +66,7 @@ export default async function JobCardScanPage({
   const isTechnician = canScanTime(user, settings.methods);
   const isStore = canManageInventory(user);
   const browse = canBrowseJobCards(user);
-  const [mine, blocker, otherOpen, mayClose, lines, team] = await Promise.all([
+  const [mine, blocker, otherOpen, mayClose, lines, team, pending] = await Promise.all([
     isTechnician && user.employeeId ? myTimeOnCard(user.employeeId, card.id) : Promise.resolve(null),
     isTechnician ? startBlocker(user, card) : Promise.resolve(""),
     isTechnician && user.employeeId
@@ -82,7 +82,15 @@ export default async function JobCardScanPage({
       include: { employee: { select: { name: true } } },
       orderBy: { startedAt: "asc" },
     }),
+    isTechnician && user.employeeId ? pendingAfterShift(user.employeeId, card.id) : Promise.resolve(null),
   ]);
+  const afterShift = pending
+    ? {
+        kind: pending.endedAt ? ("limit" as const) : ("running" as const),
+        shiftEnd: pending.shiftEndAt ? formatTime(pending.shiftEndAt) : "",
+        stoppedAt: pending.endedAt ? formatDateTime(pending.endedAt) : "",
+      }
+    : null;
   const closed = card.status === "CLOSED";
   const qrSwitchedOff = !!user.employeeId && !isTechnician;
   const nothingToDo = !isTechnician && !isStore && !mayClose && !browse;
@@ -93,6 +101,11 @@ export default async function JobCardScanPage({
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Job card</p>
           <h1 className="font-mono text-2xl font-bold">{card.code}</h1>
+          {card.asset && (
+            <p className="text-sm text-gray-600">
+              <span className="font-mono font-semibold">{card.asset.code}</span> {card.asset.description}
+            </p>
+          )}
         </div>
         {closed ? <span className="badge bg-gray-800 text-white">Closed</span> : <span className="badge bg-blue-100 text-blue-800">Open</span>}
       </div>
@@ -111,6 +124,7 @@ export default async function JobCardScanPage({
               blocker={blocker}
               hoursToday={mine.hoursToday}
               hoursTotal={mine.hoursTotal}
+              afterShift={afterShift}
             />
             {mine.sessions.length > 0 && (
               <div className="card p-4">

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { canManageMasterData } from "@/lib/auth/access";
+import { canManageSettings } from "@/lib/auth/access";
 import { HttpError, readJson, withUser } from "@/lib/http";
 import { audit } from "@/lib/audit";
 
@@ -27,7 +27,7 @@ export const PATCH = withUser<Ctx>(async (request, user, { params }) => {
   });
   await audit(user.id, "FIELD_UPDATED", "FieldDefinition", id, body as object);
   return NextResponse.json({ ok: true });
-}, canManageMasterData);
+}, canManageSettings);
 
 /** Removes the field definition. Values already saved stay in the data but are no longer shown. */
 export const DELETE = withUser<Ctx>(async (_request, user, { params }) => {
@@ -37,4 +37,4 @@ export const DELETE = withUser<Ctx>(async (_request, user, { params }) => {
   });
   await audit(user.id, "FIELD_DELETED", "FieldDefinition", id);
   return NextResponse.json({ ok: true });
-}, canManageMasterData);
+}, canManageSettings);

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { canDeleteRecords, canEditRecords } from "@/lib/auth/access";
+import { canDeleteRecords, canEditRecords, getViewScope, scopeAllows } from "@/lib/auth/access";
 import { HttpError, readJson, withUser } from "@/lib/http";
 import { updateRecord, type RecordUpdate } from "@/lib/records";
 import { audit } from "@/lib/audit";
@@ -19,7 +19,7 @@ export const PATCH = withUser<Ctx>(async (request, user, { params }) => {
 export const DELETE = withUser<Ctx>(async (_request, user, { params }) => {
   const { id } = await params;
   const record = await prisma.manHourRecord.findUnique({ where: { id }, include: { jobCard: true, employee: true } });
-  if (!record) throw new HttpError(404, "Record not found.");
+  if (!record || !scopeAllows(getViewScope(user), record.employeeId)) throw new HttpError(404, "Record not found.");
   await prisma.$transaction([
     // A QR record is the sum of its work sessions, so they go with it.
     ...(record.source === "QR" ? [prisma.workSession.deleteMany({ where: { employeeId: record.employeeId, jobCardId: record.jobCardId } })] : []),

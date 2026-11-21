@@ -7,6 +7,7 @@ import { api, errorMessage } from "@/lib/client";
 import { Alert, Modal } from "@/components/ui";
 import { DEFAULT_TIMEOUT_SECONDS, PROVIDER_INFO, PROVIDER_TYPES, type ProviderType, type PublicProvider } from "@/lib/ai-provider-info";
 import { LOGGING_METHODS, LOGGING_METHOD_INFO, type LoggingMethod } from "@/lib/logging-methods";
+import { ShiftSettings, type ShiftRow } from "@/components/shift-settings";
 
 type GeneralValues = {
   dailyHourLimit: string;
@@ -15,7 +16,11 @@ type GeneralValues = {
   methods: Record<LoggingMethod, boolean>;
   maxSessionHours: string;
   appBaseUrl: string;
+  shiftAlerts: boolean;
+  shiftGraceMinutes: string;
 };
+
+type MailInfo = { label: string; from: string; ready: boolean; missing: string[] };
 
 type Field = {
   id: string;
@@ -41,6 +46,7 @@ type ApiKeyRow = {
 
 const TABS = [
   { id: "general", label: "General" },
+  { id: "shifts", label: "Shifts" },
   { id: "ocr", label: "Photo reading" },
   { id: "fields", label: "Form fields" },
   { id: "api", label: "API access" },
@@ -52,6 +58,8 @@ const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", 
 
 export function SettingsTabs(props: {
   general: GeneralValues;
+  mail: MailInfo;
+  shifts: ShiftRow[];
   ocr: { providers: PublicProvider[]; tesseractLanguage: string };
   fields: Field[];
   apiKeys: ApiKeyRow[];
@@ -72,7 +80,8 @@ export function SettingsTabs(props: {
           </button>
         ))}
       </div>
-      {tab === "general" && <GeneralSettings initial={props.general} />}
+      {tab === "general" && <GeneralSettings initial={props.general} mail={props.mail} />}
+      {tab === "shifts" && <ShiftSettings shifts={props.shifts} />}
       {tab === "ocr" && <OcrSettings initial={props.ocr} />}
       {tab === "fields" && <FieldSettings fields={props.fields} />}
       {tab === "api" && <ApiSettings keys={props.apiKeys} />}
@@ -100,9 +109,24 @@ function useSaver() {
   return { busy, message, run, setMessage };
 }
 
-function GeneralSettings({ initial }: { initial: GeneralValues }) {
+function GeneralSettings({ initial, mail }: { initial: GeneralValues; mail: MailInfo }) {
   const [values, setValues] = useState(initial);
   const { busy, message, run } = useSaver();
+  const [testing, setTesting] = useState(false);
+  const [mailMessage, setMailMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  async function testEmail() {
+    setTesting(true);
+    setMailMessage(null);
+    try {
+      const result = await api<{ message: string }>("/api/settings/test-email", { body: {} });
+      setMailMessage({ kind: "success", text: result.message });
+    } catch (err) {
+      setMailMessage({ kind: "error", text: errorMessage(err) });
+    } finally {
+      setTesting(false);
+    }
+  }
   return (
     <div className="card max-w-2xl space-y-4 p-5">
       <div>
@@ -137,6 +161,35 @@ function GeneralSettings({ initial }: { initial: GeneralValues }) {
           <label className="label">App address for QR codes</label>
           <input className="input" placeholder="e.g. http://192.168.1.20:3002" value={values.appBaseUrl} onChange={(e) => setValues({ ...values, appBaseUrl: e.target.value })} />
           <p className="mt-1 text-xs text-gray-500">The address phones use to open the app. Leave empty to use the address you are using now.</p>
+        </div>
+      </div>
+      <div className="space-y-3 border-t border-gray-100 pt-4">
+        <h2 className="font-semibold">After-shift reminders</h2>
+        <label className="flex items-start gap-3 text-sm">
+          <input type="checkbox" className="mt-0.5" checked={values.shiftAlerts} onChange={(e) => setValues({ ...values, shiftAlerts: e.target.checked })} />
+          <span>
+            Remind technicians still clocked in after their shift (in the app); the timer keeps running
+            <span className="block text-gray-500">It is stopped when the daily or weekly hour limit above is reached (or the maximum session length if no limit is set), and then the supervisor gets an email (admins if none). Shifts are set up on the Shifts tab and assigned on the Employees page.</span>
+          </span>
+        </label>
+        <div className="max-w-xs">
+          <label className="label">Grace period after shift end (minutes)</label>
+          <input className="input" type="number" min="0" max="240" step="1" value={values.shiftGraceMinutes} onChange={(e) => setValues({ ...values, shiftGraceMinutes: e.target.value })} />
+        </div>
+        <div className="rounded-lg border border-gray-200 p-3 text-sm">
+          <p>
+            Email: <b>{mail.label}</b>
+            {mail.from && <span className="text-gray-500"> · sent from {mail.from}</span>}
+          </p>
+          {!mail.ready && (
+            <p className="mt-1 text-amber-700">
+              {mail.missing.length ? `Missing on the server: ${mail.missing.join(", ")}.` : "Add the email settings to the server environment (see README › Email)."} Reminders and limit stops still happen; only the email is skipped.
+            </p>
+          )}
+          <button type="button" className="btn btn-sm mt-2" disabled={testing || !mail.ready} onClick={testEmail}>
+            {testing ? "Sending…" : "Send me a test email"}
+          </button>
+          {mailMessage && <div className="mt-2"><Alert kind={mailMessage.kind}>{mailMessage.text}</Alert></div>}
         </div>
       </div>
       <h2 className="border-t border-gray-100 pt-4 font-semibold">Hour limits</h2>

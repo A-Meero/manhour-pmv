@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { authenticateApiKey } from "@/lib/api-keys";
-import { importJobCards } from "@/lib/masterdata";
+import { importJobCards } from "@/lib/job-card-entry";
 
 const MAX_ITEMS = 5000;
 
 /**
  * POST /api/v1/job-cards
- * Body: ["JC-1001", "JC-1002"]  or  { "jobCards": [{ "id": "JC-1001", "fields": { "<custom field key>": "…" } }] }
+ * Body: ["JC-1001", "JC-1002"]  or  { "jobCards": [{ "id": "JC-1001", "assetCode": "SUV172", "dateIn": "2026-11-21", "jobType": "Break Down",
+ *   "project": "…", "workDone": "line 1; line 2", "fields": { "<custom field key>": "…" } }] }
+ * Header fields (all optional): assetCode / plateNo / chassisNo, dateIn, dateOut, previousReading, currentReading, jobType,
+ * repairAt, project, operatorName, receivedBy, createdByName, workDone. The asset must exist and must not have an open job card.
  * Existing IDs are skipped. Response: { created, skipped, failed, issues[] }.
  */
 export async function POST(request: Request) {
@@ -20,8 +23,8 @@ export async function POST(request: Request) {
   if (list.length > MAX_ITEMS) return NextResponse.json({ message: `Send at most ${MAX_ITEMS} job cards per request.` }, { status: 413 });
   const items = list.map((entry, index) => {
     if (entry && typeof entry === "object") {
-      const item = entry as { id?: unknown; code?: unknown; fields?: Record<string, unknown> };
-      return { row: index + 1, code: item.id ?? item.code, fields: item.fields };
+      const item = entry as Record<string, unknown> & { id?: unknown; code?: unknown; fields?: Record<string, unknown> };
+      return { ...item, row: index + 1, code: item.id ?? item.code, fields: item.fields };
     }
     return { row: index + 1, code: entry };
   });

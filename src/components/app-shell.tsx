@@ -9,6 +9,7 @@ import {
   Camera,
   Clock,
   CreditCard,
+  FilePlus2,
   History,
   House,
   KeyRound,
@@ -18,7 +19,10 @@ import {
   Package,
   Plus,
   Settings,
+  ScanLine,
+  ShieldCheck,
   Timer,
+  Truck,
   Upload,
   User,
   Users,
@@ -26,6 +30,7 @@ import {
 } from "lucide-react";
 import type { NavItem } from "@/lib/nav";
 import { api } from "@/lib/client";
+import { NotificationBell } from "@/components/notification-bell";
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   home: House,
@@ -40,13 +45,18 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   history: History,
   settings: Settings,
   timer: Timer,
+  scan: ScanLine,
   clock: Clock,
   box: Package,
+  cardplus: FilePlus2,
+  truck: Truck,
+  shield: ShieldCheck,
 };
 
 function isActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
   if (href === "/records") return pathname === "/records";
+  if (href === "/job-cards" && pathname === "/job-cards/new") return false;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -133,8 +143,14 @@ export function AppShell({
           </button>
           <Image src="/ahmadiah-a.png" alt="" width={214} height={204} className="h-7 w-auto" />
           <span className="text-sm font-bold text-gray-900">Man Hour System</span>
+          <div className="ml-auto">
+            <NotificationBell />
+          </div>
         </header>
-        <main className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:py-8">{children}</main>
+        <div className="hidden justify-end px-8 pt-3 lg:flex">
+          <NotificationBell />
+        </div>
+        <main className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:pb-8 lg:pt-0">{children}</main>
       </div>
     </div>
   );

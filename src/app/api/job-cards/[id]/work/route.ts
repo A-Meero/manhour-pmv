@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { HttpError, readJson, withUser } from "@/lib/http";
-import { startSession, stopSession } from "@/lib/work-sessions";
+import { answerAfterShift, startSession, stopSession } from "@/lib/work-sessions";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -14,6 +14,10 @@ export const POST = withUser<Ctx>(async (request, user, { params }) => {
   }
   if (body.action === "stop") {
     await stopSession(user, id);
+    return NextResponse.json({ ok: true });
+  }
+  if (body.action === "continue" || body.action === "shift-end" || body.action === "keep") {
+    await answerAfterShift(user, id, ({ continue: "CONTINUE", "shift-end": "SHIFT_END", keep: "KEEP" } as const)[body.action]);
     return NextResponse.json({ ok: true });
   }
   throw new HttpError(400, "Unknown action.");

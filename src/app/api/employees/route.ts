@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { canManageMasterData } from "@/lib/auth/access";
+import { canManageEmployees } from "@/lib/auth/access";
 import { HttpError, readJson, withUser } from "@/lib/http";
 import { normalizeCode, parseAmount } from "@/lib/masterdata";
 import { getFieldDefinitions, toFieldDefs, validateCustomFields } from "@/lib/fields";
 import { audit } from "@/lib/audit";
+import { readShiftId } from "@/lib/shift-body";
 
 type EmployeeBody = {
   fileNo?: string;
   name?: string;
   jobTitle?: string;
   hourlyRate?: string | number;
+  shiftId?: string | null;
   active?: boolean;
   supervisorIds?: string[];
   customFields?: Record<string, unknown>;
@@ -24,6 +26,7 @@ export const POST = withUser(async (request, user) => {
   if (await prisma.employee.findUnique({ where: { fileNo } })) throw new HttpError(409, `File no. ${fileNo} already exists.`);
   const hourlyRate = parseAmount(body.hourlyRate);
   if (hourlyRate === null || (hourlyRate !== undefined && hourlyRate < 0)) throw new HttpError(400, "Hourly rate must be a number of 0 or more.");
+  const shiftId = await readShiftId(body.shiftId);
   const custom = validateCustomFields(toFieldDefs(await getFieldDefinitions("EMPLOYEE")), body.customFields);
   if (custom.errors.length) throw new HttpError(400, custom.errors.join("; "));
   const supervisorIds = Array.from(new Set(body.supervisorIds ?? []));
@@ -36,10 +39,11 @@ export const POST = withUser(async (request, user) => {
       name,
       jobTitle: body.jobTitle?.trim() ?? "",
       hourlyRate: hourlyRate ?? 0,
+      shiftId: shiftId ?? null,
       customFields: custom.values,
       supervisors: { create: supervisorIds.map((supervisorId) => ({ supervisorId })) },
     },
   });
   await audit(user.id, "EMPLOYEE_CREATED", "Employee", employee.id, { fileNo });
   return NextResponse.json({ id: employee.id });
-}, canManageMasterData);
+}, canManageEmployees);

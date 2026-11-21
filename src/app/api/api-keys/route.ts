@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { canManageMasterData } from "@/lib/auth/access";
+import { canManageSettings } from "@/lib/auth/access";
 import { HttpError, readJson, withUser } from "@/lib/http";
 import { API_SCOPES, generateKey } from "@/lib/api-keys";
 import { audit } from "@/lib/audit";
@@ -16,4 +16,4 @@ export const POST = withUser(async (request, user) => {
   const created = await prisma.apiKey.create({ data: { name, prefix, keyHash, scopes, createdById: user.id } });
   await audit(user.id, "API_KEY_CREATED", "ApiKey", created.id, { name, scopes });
   return NextResponse.json({ id: created.id, key });
-}, canManageMasterData);
+}, canManageSettings);

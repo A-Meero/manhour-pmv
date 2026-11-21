@@ -21,24 +21,40 @@ It uses the same stack as PMV Workflow: Next.js 16.3, React 19.2, TypeScript, Pr
 
 For later schema changes, run `npx prisma migrate deploy` on the server.
 
+### Docker
+
+The app runs with `docker compose` (`docker-compose.yml`, settings in `.env.docker`). To update to a new version:
+
+```
+docker compose up -d --build
+```
+
+On start the container applies new database migrations (`prisma migrate deploy`) and then starts the app, together with the background checks for shift ends and stale QR sessions. Email needs the variables from the **Email** section in `.env.docker`. Set `DISABLE_SCHEDULER="true"` only if another copy of the app already runs the checks.
+
 ## Who can do what
 
-| | Admin | Manager | Supervisor (any user with assigned employees) | Employee user |
-|---|---|---|---|---|
-| View records | all | all | own + supervised employees | own (linked employee) |
-| Enter / import / scan records | anyone | anyone | supervised employees | self, only if "Can enter his own records" is ticked |
-| Start / stop work by scanning a job card QR code | if linked to an employee | if linked to an employee | if linked to an employee | if linked to an employee |
-| Review and correct QR work sessions | all | all | supervised employees | – |
-| Close / reopen job cards | any card | any card | cards their employees worked on | – |
-| Edit records | ✓ | ✓ | – | – |
-| Delete records | ✓ | – | – | – |
-| Analytics, labour and parts costs | ✓ | ✓ | – | – |
-| Browse job cards, print QR labels | ✓ | ✓ | ✓ | store managers |
-| Create / edit job cards, employees, users, form fields, settings, API keys | ✓ | – | – | – |
-| Use a logging way switched off in Settings | ✓ | – | – | – |
-| Blocked by the daily/weekly hour limits | no | yes | yes | yes |
+- **Admin** (tick box on the user) can do everything, including Settings, API keys, form fields and the **Permissions** page.
+- Everyone else gets what their **permission groups** allow (**Permissions** page: create groups, tick permissions, add members; or pick groups on the Users page). A user in several groups gets all of their permissions.
+- Every user sees **their own records** (linked employee). **Supervisors** (users assigned to employees on the Employees page) also see, enter, review and close cards for **their team**, without any permission.
 
-**Store manager** is a tick box on any user (Users page). Store managers manage the inventory and issue spare parts to job cards. Admins can do this as well.
+| Area | Permission | What it allows |
+|---|---|---|
+| Job cards | View job cards | Browse job cards, open a card, print QR labels |
+| | Add job cards | Add Job Card page (photo / typed) and the Excel import |
+| | Edit job card details | Correct the printed details, link another asset, deactivate / delete unused cards |
+| | Close & reopen job cards | Any card (supervisors without it: cards their team worked on) |
+| Time | Technician | Start / stop work by scanning job card QR codes (login linked to an employee) |
+| | Enter own man hours | New Entry / Scan Sheet / Import for themselves |
+| Records | View all employees' records | Instead of own + team |
+| | Enter records for anyone | Instead of own (if allowed) + team |
+| | Edit records · Delete records | On the records they can see |
+| | View analytics · View costs & rates | Analytics; hourly rates, labour, parts and asset values |
+| Sessions | Review all work sessions | Instead of their team only |
+| Store | Store manager | Issue spare parts, manage the inventory |
+| Assets | View assets & history · Manage assets | Assets pages; add / edit / import assets |
+| Administration | Manage employees & shifts · Manage users | Employees page and shifts; Users page (can't create or change admins) |
+
+The upgrade turned the old user types into groups automatically: **Manager**, **Store Manager**, **Technician** (every user linked to an employee) and **Own records entry**. Hour limits block everyone except admins. A logging way switched off in Settings stays available to admins only.
 
 ## Rules
 
@@ -62,6 +78,7 @@ Each way can be switched off in **Settings › General › Ways of logging man-h
    - The user always reviews the rows next to the photo before saving. The photo stays linked to the saved records.
 4. **Job card QR**: every job card has a QR code (Job Cards › QR icon, or **QR labels (open cards)** for a printable A4 sheet of labels).
    - A technician scans it with the phone's normal camera. The link opens the job card, and they sign in with their own login (linked to their employee record) and tap **Start work** / **Stop work**. They can do this as often as needed, over several days, until the card is closed.
+   - Or from inside the portal: **Scan Job Card** in the menu. **Take a photo of the QR** works over plain http, and the photo is read in the browser and never uploaded. When the portal is opened over HTTPS, a **live camera** button appears too. The job card number can also be typed. The same page is used by store managers and supervisors.
    - One job at a time: starting on another card stops the one still running.
    - All of a technician's sessions on a card add up into their single man-hour record for it (source "QR scan"), so Records, Analytics, limits and exports include them. The hours and dates of such a record can't be typed over; correct the sessions instead.
    - If a technician's hours on a card were already entered another way (form, Excel, sheet), QR scanning on that card is blocked for them.
@@ -69,6 +86,55 @@ Each way can be switched off in **Settings › General › Ways of logging man-h
    - QR time is measured clock time, so it is never blocked by the hour limits. A session that takes an employee over a limit is flagged for review instead.
    - The QR codes hold `<App address>/jc/<job card ID>`. Set **Settings › General › App address** to the address phones use on your network (e.g. `http://192.168.1.20:3002`) **before printing labels**. Otherwise the address you are using at that moment is printed, and `localhost` won't work from a phone.
    - Login sessions last 12 hours, so technicians sign in again once a day.
+
+## Shifts and after-shift alerts
+
+- **Settings › Shifts**: define named shifts with start time, end time and working days (the day the shift starts). An end time earlier than the start means an overnight shift, e.g. 19:00–07:00.
+- **Employees**: give each employee a shift (form, or the **Shift** column of the Excel import, matched by shift name).
+- Every minute the server checks QR sessions that are still running. If a session started during the employee's shift (or up to 2 h early) and the shift ended more than the **grace period** ago (Settings › General, 15 min by default):
+  1. the technician gets an **in-app reminder** (bell), and the **timer keeps running**;
+  2. it is stopped when the technician's **daily or weekly hour limit** (Settings › General) is reached, whichever comes first, at the exact moment it was reached, but never before the shift end. With no limits set, the **maximum session length** applies instead.
+  3. At that stop the session is flagged for review, the technician is notified in the app, and the supervisor(s) get an **email** (admins, when the employee has no supervisor; one email per supervisor per check).
+- When the technician opens the job card (from the notification or by scanning it) they answer:
+  - still running: **Continue working** or **I finished at <shift end>** (the end time becomes the shift end);
+  - stopped at the limit: **I finished at <shift end>** (end time corrected, review cleared) or **I worked until <time>** (kept, stays flagged for the supervisor).
+- Sessions started outside the shift (overtime, days off) get no reminder; the maximum session length still applies to them.
+- Supervisors confirm or correct the times on **Work Sessions**.
+- Turn the reminders off with **Settings › General › After-shift reminders**. If email isn't set up, reminders and stops still happen, and the skipped email is written to the audit log.
+
+## Notifications
+
+The bell at the top shows unread in-app notifications (refreshed every minute). Clicking one opens what it is about; **See all** lists the last 200.
+
+- **Shift reminder** and **work stopped at the hour limit**: to the technician.
+- **Session to review**: to the employee's supervisors (admins if none), once per flagged session.
+- **Low stock**: to store managers and admins when a part drops to or below its low-stock level (once each time it crosses the level).
+
+## Job cards and assets
+
+- **Add Job Card** (permission "Add job cards"): photograph the printed job card from the workshop system (a PDF of it also works). The AI providers from Settings › Photo reading read the **printed** header only and ignore handwriting: Rep.Order Number (= the job card number), Code (= asset code), description, plate, chassis, YoM, HM/KM readings, date in, job type, repair at, project, work done lines, operator, received by, created by. Everything is shown next to the photo to check before saving. **Type it in** is the same form without a photo. The photo stays linked to the card ("Original card").
+- Checks before saving (repeated on the server):
+  - the **job card number must be new**;
+  - the **asset** is found by code, then plate no., then chassis no. If none matches, **Create asset from this card** adds it (the rest of its details are completed on the Assets page), or another asset can be chosen;
+  - an asset can have **only one open job card**. Only an admin can add a second one ("Add anyway"), and reopening a closed card follows the same rule.
+- The Excel import of job cards (Job Cards page) has the same columns; the asset must exist, and rows for an asset that already has an open card are rejected (except in an admin's import).
+- **Assets** (permissions "View assets" / "Manage assets"): code, description, category, location / department, make, model, serial, chassis, plate, year, purchase date, purchase value and **depreciation rate** (straight line, % of the purchase value per year). Add them one by one, import them from Excel, export the list.
+- The **asset page** shows its details, the **book value today**, the **total maintenance cost** (labour + parts of all its job cards), the cost **per month and per year**, and the **job card history** with dates, job type, HM/KM and cost of each card. Values and costs need "View costs & rates".
+
+## Email
+
+Email is configured on the server, not in the portal, so the password or secret never sits in the database. Add the variables to `.env` (or `.env.docker`); see `.env.example`.
+
+**Microsoft 365 / Outlook (recommended): Microsoft Graph.** Microsoft is retiring password sign-in for SMTP on Exchange Online, so the app sends through Graph with an app registration:
+
+1. In the **Entra admin center** › App registrations › **New registration** (single tenant, no redirect URI).
+2. **API permissions** › Add › Microsoft Graph › **Application permissions** › `Mail.Send` › **Grant admin consent**.
+3. **Certificates & secrets** › New client secret. Copy the value, because it's only shown once and it expires (renew it before the date shown).
+4. Pick the sender mailbox, e.g. a shared mailbox `noreply@yourcompany.com`. Recommended: limit the app to that mailbox with an Exchange **application access policy** (or RBAC for Applications), because `Mail.Send` otherwise allows sending as any mailbox.
+5. Set `MAIL_PROVIDER="graph"`, `MAIL_FROM`, `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID` and `GRAPH_CLIENT_SECRET`, then restart the app.
+6. **Settings › General › Send me a test email** sends to your own login email.
+
+Other mail servers: `MAIL_PROVIDER="smtp"` with `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`. Supervisors receive alerts at their **login email**, so it has to be a real mailbox.
 
 ## Spare parts and inventory
 

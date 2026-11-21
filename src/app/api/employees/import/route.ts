@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { canManageMasterData } from "@/lib/auth/access";
+import { canManageEmployees } from "@/lib/auth/access";
 import { HttpError, withUser } from "@/lib/http";
 import { importEmployees } from "@/lib/masterdata";
 import { parseWorkbook } from "@/lib/excel";
@@ -20,9 +20,10 @@ export const POST = withUser(async (request, user) => {
       jobTitle: row.values.jobTitle,
       supervisors: row.values.supervisors,
       hourlyRate: row.values.hourlyRate,
+      shift: row.values.shift,
       fields: row.fields,
     })),
     { source: "EXCEL", actorId: user.id, fileName },
   );
   return NextResponse.json(summary);
-}, canManageMasterData);
+}, canManageEmployees);

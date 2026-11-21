@@ -2,14 +2,15 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import type { CurrentUser } from "@/lib/auth/session";
-import { isManagerOrAdmin, isSupervisor } from "@/lib/auth/access";
+import { can, isSupervisor } from "@/lib/auth/access";
 import { HttpError } from "@/lib/http";
 import { stopAllOnCard } from "@/lib/work-sessions";
 import { audit } from "@/lib/audit";
+import { assertCanReopen } from "@/lib/job-card-entry";
 
-/** Admins and managers close any card; supervisors close cards that one of their employees worked on. */
+/** "Close job cards" closes any card; supervisors close cards that one of their employees worked on. */
 export async function canCloseCard(user: CurrentUser, jobCardId: string) {
-  if (isManagerOrAdmin(user)) return true;
+  if (can(user, "jobcards.close")) return true;
   if (!isSupervisor(user)) return false;
   const ids = user.supervisedEmployeeIds;
   const [sessions, records] = await Promise.all([
@@ -27,6 +28,7 @@ export async function setJobCardStatus(user: CurrentUser, jobCardId: string, sta
     throw new HttpError(403, "You can only close or reopen job cards that your employees worked on.");
   }
   if (card.status === status) return { stopped: 0 };
+  if (status === "OPEN") await assertCanReopen(user, card);
   const stopped = await prisma.$transaction(async (tx) => {
     const count = status === "CLOSED" ? await stopAllOnCard(tx, jobCardId, user.id) : 0;
     await tx.jobCard.update({

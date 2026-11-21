@@ -18,6 +18,10 @@ export type AppSettings = {
   maxSessionHours: number;
   /** Address phones use to reach the app, used in the job card QR codes, e.g. "http://192.168.1.20:3002". "" = the request's host */
   appBaseUrl: string;
+  /** Stop QR sessions still running after the employee's shift and email the supervisor */
+  shiftAlerts: boolean;
+  /** Minutes after the shift end before that happens */
+  shiftGraceMinutes: number;
 };
 
 const DEFAULTS = {
@@ -31,6 +35,8 @@ const DEFAULTS = {
   methodQr: "on",
   maxSessionHours: "12",
   appBaseUrl: "",
+  shiftAlerts: "on",
+  shiftGraceMinutes: "15",
 };
 
 export type SettingKey = keyof typeof DEFAULTS;
@@ -47,6 +53,7 @@ export async function getSettings(): Promise<AppSettings> {
   for (const row of rows) map[row.key] = row.value;
   const weekStartDay = Number(map.weekStartDay);
   const maxSessionHours = Number(map.maxSessionHours);
+  const grace = Number(map.shiftGraceMinutes);
   return {
     dailyHourLimit: toLimit(map.dailyHourLimit),
     weeklyHourLimit: toLimit(map.weeklyHourLimit),
@@ -60,6 +67,8 @@ export async function getSettings(): Promise<AppSettings> {
     },
     maxSessionHours: Number.isFinite(maxSessionHours) && maxSessionHours > 0 && maxSessionHours <= 72 ? maxSessionHours : 12,
     appBaseUrl: map.appBaseUrl.trim().replace(/\/+$/, ""),
+    shiftAlerts: map.shiftAlerts !== "off",
+    shiftGraceMinutes: Number.isInteger(grace) && grace >= 0 && grace <= 240 ? grace : 15,
   };
 }
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Play, Square } from "lucide-react";
+import { CheckCircle2, Clock, Play, Square } from "lucide-react";
 import { api, errorMessage } from "@/lib/client";
 import { Alert } from "@/components/ui";
 
@@ -16,6 +16,8 @@ type Props = {
   blocker: string;
   hoursToday: number;
   hoursTotal: number;
+  /** Still clocked in after the shift ("running"), or stopped at the hour limit after it ("limit"), not yet answered */
+  afterShift: { kind: "running" | "limit"; shiftEnd: string; stoppedAt: string } | null;
 };
 
 function elapsed(since: string, now: number) {
@@ -28,7 +30,7 @@ function elapsed(since: string, now: number) {
 
 const fmt = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
-export function WorkPanel({ jobCardId, code, runningSince, otherRunning, blocker, hoursToday, hoursTotal }: Props) {
+export function WorkPanel({ jobCardId, code, runningSince, otherRunning, blocker, hoursToday, hoursTotal, afterShift }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -40,6 +42,28 @@ export function WorkPanel({ jobCardId, code, runningSince, otherRunning, blocker
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [runningSince]);
+
+  async function answer(action: "continue" | "shift-end" | "keep") {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await api(`/api/job-cards/${jobCardId}/work`, { body: { action } });
+      setNotice(
+        action === "continue"
+          ? "OK, the timer keeps running. Remember to stop when you finish."
+          : action === "shift-end"
+            ? `Saved: you finished at ${afterShift?.shiftEnd}.`
+            : "Saved. Your supervisor will check the time.",
+      );
+      router.refresh();
+    } catch (err) {
+      setError(errorMessage(err));
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function act(action: "start" | "stop") {
     if (action === "start" && otherRunning && !confirm(`You are working on ${otherRunning}. Stop it and start ${code}?`)) return;
@@ -70,7 +94,35 @@ export function WorkPanel({ jobCardId, code, runningSince, otherRunning, blocker
           <p className="text-sm text-gray-500">{blocker ? "" : "Not working on this job card right now."}</p>
         )}
       </div>
-      {blocker && !runningSince ? (
+      {afterShift ? (
+        <div className="space-y-3 rounded-lg border border-orange-200 bg-orange-50 p-4">
+          <p className="flex items-start gap-2 text-sm font-medium text-orange-900">
+            <Clock className="mt-0.5 h-4 w-4 shrink-0" />
+            {afterShift.kind === "running"
+              ? `Your shift ended at ${afterShift.shiftEnd} and you are still clocked in on ${code}.`
+              : `You did not stop after your shift (it ended at ${afterShift.shiftEnd}), so the timer was stopped at ${afterShift.stoppedAt} when your hour limit was reached.`}
+          </p>
+          {afterShift.kind === "running" ? (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button className="btn w-full border-green-600 bg-green-600 py-4 text-white hover:bg-green-700" disabled={busy} onClick={() => answer("continue")}>
+                <Play className="h-5 w-5" /> Continue working
+              </button>
+              <button className="btn btn-primary w-full py-4" disabled={busy} onClick={() => answer("shift-end")}>
+                <CheckCircle2 className="h-5 w-5" /> I finished at {afterShift.shiftEnd}
+              </button>
+            </div>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button className="btn btn-primary w-full py-4" disabled={busy} onClick={() => answer("shift-end")}>
+                <CheckCircle2 className="h-5 w-5" /> I finished at {afterShift.shiftEnd}
+              </button>
+              <button className="btn w-full py-4" disabled={busy} onClick={() => answer("keep")}>
+                <Clock className="h-5 w-5" /> I worked until {afterShift.stoppedAt.split(" ").pop()}
+              </button>
+            </div>
+          )}
+        </div>
+      ) : blocker && !runningSince ? (
         <Alert kind="warning">{blocker}</Alert>
       ) : runningSince ? (
         <button className="btn btn-primary w-full py-5 text-lg" disabled={busy} onClick={() => act("stop")}>

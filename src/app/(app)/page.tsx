@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Camera, ChartColumn, Clock, CreditCard, FileSpreadsheet, List, Package, Plus, Printer, Timer } from "lucide-react";
+import { Camera, ChartColumn, Clock, CreditCard, FileSpreadsheet, List, Package, Plus, Printer, ScanLine, Timer } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth/guards";
 import {
@@ -8,6 +8,7 @@ import {
   canManageInventory,
   canReviewSessions,
   canScanTime,
+  canUseScanPage,
   canViewAnalytics,
   getViewScope,
   methodAllowed,
@@ -58,6 +59,7 @@ export default async function HomePage() {
 
   const actions = [
     ...(scans ? [{ href: "/my-work", label: "My work", icon: Timer }] : []),
+    ...(canUseScanPage(user, settings.methods) ? [{ href: "/scan", label: "Scan job card", icon: ScanLine }] : []),
     ...(canEnterRecords(user) && allowed("manual") ? [{ href: "/records/new", label: "New entry", icon: Plus }] : []),
     ...(canEnterRecords(user) && allowed("photo") ? [{ href: "/records/scan", label: "Scan a sheet", icon: Camera }] : []),
     ...(canEnterRecords(user) && allowed("excel") ? [{ href: "/records/import", label: "Import Excel", icon: FileSpreadsheet }] : []),

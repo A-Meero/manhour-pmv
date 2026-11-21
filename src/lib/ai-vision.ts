@@ -36,7 +36,9 @@ async function post(url: string, headers: Record<string, string>, body: unknown,
 async function callAnthropic(p: ResolvedProvider, input: Input) {
   const content: unknown[] = [];
   if (input.image) {
-    content.push({ type: "image", source: { type: "base64", media_type: input.image.mimeType, data: input.image.data.toString("base64") } });
+    const source = { type: "base64", media_type: input.image.mimeType, data: input.image.data.toString("base64") };
+    // PDFs go as a document block; images as an image block.
+    content.push(input.image.mimeType === "application/pdf" ? { type: "document", source } : { type: "image", source });
   }
   content.push({ type: "text", text: input.prompt });
   const response = await post(
@@ -95,6 +97,7 @@ async function callGemini(p: ResolvedProvider, input: Input) {
 
 async function callOpenAiStyle(p: ResolvedProvider, input: Input) {
   const content: unknown[] = [{ type: "text", text: input.prompt }];
+  if (input.image?.mimeType === "application/pdf") throw new Error("this provider cannot read PDF files (use a photo, or a Gemini / Anthropic provider)");
   if (input.image) {
     content.push({ type: "image_url", image_url: { url: `data:${input.image.mimeType};base64,${input.image.data.toString("base64")}` } });
   }

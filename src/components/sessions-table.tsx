@@ -17,6 +17,10 @@ export type SessionRow = {
   endedAt: string | null;
   hours: number;
   autoStopped: boolean;
+  /** Still running after the shift ("reminded") or stopped at the hour limit after it ("limit") */
+  afterShift: "reminded" | "limit" | null;
+  /** Technician's answer: CONTINUE | SHIFT_END | KEEP */
+  afterShiftAnswer: string | null;
   needsReview: boolean;
   reviewNote: string;
   editedBy: string;
@@ -112,6 +116,13 @@ export function SessionsTable({
                 <td className="text-right font-semibold">{fmt(row.hours)}</td>
                 <td className="max-w-xs text-xs">
                   {row.autoStopped && <span className="badge mr-1 bg-amber-100 text-amber-800">Auto-stopped</span>}
+                  {row.afterShift === "limit" && <span className="badge mr-1 bg-orange-100 text-orange-800">Stopped at hour limit</span>}
+                  {row.afterShift === "reminded" && <span className="badge mr-1 bg-orange-50 text-orange-800">After shift</span>}
+                  {row.afterShiftAnswer && (
+                    <span className="badge mr-1 bg-gray-100 text-gray-700">
+                      {({ CONTINUE: "Kept working", SHIFT_END: "Finished at shift end", KEEP: "Worked until limit" } as Record<string, string>)[row.afterShiftAnswer] ?? row.afterShiftAnswer}
+                    </span>
+                  )}
                   {row.needsReview && <span className="badge mr-1 bg-amber-200 text-amber-900">Needs review</span>}
                   <span className="text-gray-600">{row.reviewNote}</span>
                   {row.editedBy && <span className="block text-gray-400">Checked by {row.editedBy}</span>}

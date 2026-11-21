@@ -1,14 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Download, Printer, QrCode } from "lucide-react";
+import { Download, FileImage, Pencil, Printer, QrCode } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requirePage } from "@/lib/auth/guards";
 import {
   canBrowseJobCards,
+  canEditJobCards,
+  canViewAssets,
   canManageInventory,
   canViewCosts,
   getViewScope,
-  isManagerOrAdmin,
+  isAdmin,
+  reviewsAllSessions,
+  seesAllRecords,
   scopeWhere,
 } from "@/lib/auth/access";
 import { autoStopStale } from "@/lib/work-sessions";
@@ -30,12 +34,18 @@ const fmt = (value: number) => value.toLocaleString("en-US", { maximumFractionDi
 export default async function JobCardDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePage(canBrowseJobCards);
   const { id } = await params;
-  const card = await prisma.jobCard.findUnique({ where: { id }, include: { closedBy: { select: { name: true } } } });
+  const card = await prisma.jobCard.findUnique({ where: { id }, include: {
+      closedBy: { select: { name: true } },
+      addedBy: { select: { name: true } },
+      asset: { select: { id: true, code: true, description: true, plateNo: true } },
+      tasks: { orderBy: { line: "asc" } },
+    },
+  });
   if (!card) notFound();
   await autoStopStale({ jobCardId: card.id });
 
-  // Admins/managers see everyone; supervisors their employees; a store manager only the parts.
-  const seesPeople = isManagerOrAdmin(user) || user.supervisedEmployeeIds.length > 0;
+  // "View all records" / "Review all sessions" see everyone; supervisors their employees; a store manager only the parts.
+  const seesPeople = seesAllRecords(user) || reviewsAllSessions(user) || user.supervisedEmployeeIds.length > 0;
   const peopleWhere = scopeWhere(getViewScope(user));
   const showCosts = canViewCosts(user);
   const isStore = canManageInventory(user);
@@ -56,7 +66,7 @@ export default async function JobCardDetailPage({ params }: { params: Promise<{ 
     appOrigin(),
     seesPeople
       ? prisma.employee.findMany({
-          where: { active: true, ...(isManagerOrAdmin(user) ? {} : { id: { in: user.supervisedEmployeeIds } }) },
+          where: { active: true, ...(reviewsAllSessions(user) ? {} : { id: { in: user.supervisedEmployeeIds } }) },
           select: { id: true, fileNo: true, name: true },
           orderBy: { name: "asc" },
         })
@@ -81,6 +91,11 @@ export default async function JobCardDetailPage({ params }: { params: Promise<{ 
         actions={
           <>
             <Link href="/job-cards" className="btn">All job cards</Link>
+            {canEditJobCards(user) && (
+              <Link href={`/job-cards/${card.id}/edit`} className="btn">
+                <Pencil className="h-4 w-4" /> Edit details
+              </Link>
+            )}
             {mayClose && <JobCardStatusButton jobCardId={card.id} code={card.code} status={card.status} />}
           </>
         }
@@ -133,6 +148,62 @@ export default async function JobCardDetailPage({ params }: { params: Promise<{ 
             </p>
           )}
         </div>
+      </div>
+
+      <div className="card mt-5 p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-semibold">Card details</h2>
+          {card.photoPath && (
+            <a className="btn btn-sm" href={`/api/job-cards/${card.id}/photo`} target="_blank" rel="noreferrer">
+              <FileImage className="h-3.5 w-3.5" /> Original card
+            </a>
+          )}
+        </div>
+        <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-4">
+          <Detail label="Asset">
+            {card.asset ? (
+              canViewAssets(user) ? (
+                <Link href={`/assets/${card.asset.id}`} className="text-brand hover:underline">
+                  <span className="font-mono">{card.asset.code}</span> {card.asset.description}
+                </Link>
+              ) : (
+                <>
+                  <span className="font-mono">{card.asset.code}</span> {card.asset.description}
+                </>
+              )
+            ) : (
+              <span className="text-gray-400">None</span>
+            )}
+          </Detail>
+          {card.asset?.plateNo && <Detail label="Plate no.">{card.asset.plateNo}</Detail>}
+          <Detail label="Date in">{formatDate(card.dateIn)}</Detail>
+          <Detail label="Date out">{formatDate(card.dateOut)}</Detail>
+          <Detail label="Job type">{card.jobType}</Detail>
+          <Detail label="Previous HM/KM">{card.previousReading === null ? "" : Number(card.previousReading).toLocaleString("en-US")}</Detail>
+          <Detail label="Current HM/KM">{card.currentReading === null ? "" : Number(card.currentReading).toLocaleString("en-US")}</Detail>
+          <Detail label="Repair at">{card.repairAt}</Detail>
+          <Detail label="Project">{card.project}</Detail>
+          <Detail label="Operator">{card.operatorName}</Detail>
+          <Detail label="Received by">{card.receivedBy}</Detail>
+          <Detail label="Created by (card)">{card.createdByName}</Detail>
+          <Detail label="Added to this system">
+            {formatDateTime(card.createdAt)}
+            {card.addedBy ? ` by ${card.addedBy.name}` : ""} · {SOURCE_LABEL[card.source] ?? card.source}
+          </Detail>
+        </dl>
+        {card.tasks.length > 0 && (
+          <div className="mt-4">
+            <h3 className="mb-1 text-xs font-bold uppercase tracking-wide text-gray-500">Work done</h3>
+            <ol className="list-decimal space-y-0.5 pl-5 text-sm">
+              {card.tasks.map((task) => (
+                <li key={task.id}>
+                  {task.description}
+                  {task.fromDate && <span className="text-xs text-gray-500"> · from {formatDate(task.fromDate)}</span>}
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
       </div>
 
       {seesPeople && (
@@ -192,9 +263,19 @@ export default async function JobCardDetailPage({ params }: { params: Promise<{ 
 
       {(isStore || showCosts) && (
         <div className="mt-5">
-          <IssuePartsPanel jobCardId={card.id} closed={card.status === "CLOSED" && user.role !== "ADMIN"} issued={lines} canIssue={isStore} />
+          <IssuePartsPanel jobCardId={card.id} closed={card.status === "CLOSED" && !isAdmin(user)} issued={lines} canIssue={isStore} />
         </div>
       )}
     </>
+  );
+}
+
+function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+  if (children === "" || children === null || children === undefined) return null;
+  return (
+    <div>
+      <dt className="text-xs text-gray-500">{label}</dt>
+      <dd className="font-medium">{children}</dd>
+    </div>
   );
 }
