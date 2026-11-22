@@ -6,7 +6,7 @@ import { api, errorMessage } from "@/lib/client";
 import { Alert } from "@/components/ui";
 
 type Issue = { row: number; value: string; reason: string; status: "skipped" | "failed" };
-type Summary = { batchId: string | null; totalRows: number; created: number; skipped: number; failed: number; issues: Issue[] };
+type Summary = { batchId: string | null; totalRows: number; created: number; updated?: number; skipped: number; failed: number; issues: Issue[] };
 
 /** Upload an Excel file, then show what was imported and which rows were skipped or invalid. */
 export function ImportPanel({
@@ -68,7 +68,7 @@ export function ImportPanel({
       {summary && (
         <div className="space-y-2">
           <Alert kind={summary.failed ? "warning" : "success"}>
-            {summary.totalRows} row(s) read · <b>{summary.created} imported</b> · {summary.skipped} skipped · {summary.failed} invalid
+            {summary.totalRows} row(s) read · <b>{summary.created} imported</b>{summary.updated ? <> · <b>{summary.updated} updated</b></> : null} · {summary.skipped} skipped · {summary.failed} invalid
           </Alert>
           {summary.issues.length > 0 && (
             <>

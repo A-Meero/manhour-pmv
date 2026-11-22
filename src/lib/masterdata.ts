@@ -10,6 +10,8 @@ export type ImportSummary = {
   batchId: string | null;
   totalRows: number;
   created: number;
+  /** Existing rows changed (asset import only) */
+  updated?: number;
   skipped: number;
   failed: number;
   issues: ImportIssue[];
@@ -42,6 +44,7 @@ export async function saveImportBatch(
       fileName: meta.fileName ?? "",
       totalRows: summary.totalRows,
       created: summary.created,
+      updated: summary.updated ?? 0,
       skipped: summary.skipped,
       failed: summary.failed,
       issues: summary.issues as unknown as Prisma.InputJsonValue,

@@ -27,7 +27,7 @@ export const STANDARD_COLUMNS: Record<TemplateKind, Column[]> = {
     { header: "Work Done", key: "workDone", width: 40, note: "Optional. Task lines; separate several with a semicolon (;)." },
   ],
   assets: [
-    { header: "Asset Code", key: "assetCode", width: 14, note: "Unique asset code (\"Code\" on the job card, e.g. SUV172). Existing codes are skipped.", required: true },
+    { header: "Asset Code", key: "assetCode", width: 14, note: "Unique asset code (\"Code\" on the job card, e.g. SUV172). If the code already exists, that asset is updated from the filled-in cells.", required: true },
     { header: "Description", key: "description", width: 34, note: "e.g. MITSUBISHI PAJERO SPORT SUV" },
     { header: "Category", key: "category", width: 16, note: "Optional, e.g. SUV, Pick Up, Dump Truck, Generator." },
     { header: "Location / Department", key: "location", width: 22, note: "Optional." },

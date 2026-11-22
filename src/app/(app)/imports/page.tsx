@@ -46,7 +46,7 @@ export default async function ImportsPage() {
                 <td className="max-w-48 truncate">{batch.fileName}</td>
                 <td>{batch.createdBy?.name ?? batch.apiKey?.name ?? ""}</td>
                 <td>{batch.totalRows}</td>
-                <td className="font-semibold text-green-700">{batch.created}</td>
+                <td className="font-semibold text-green-700">{batch.created}{batch.updated > 0 && <span className="block text-xs font-normal text-gray-600">+{batch.updated} updated</span>}</td>
                 <td>{batch.skipped}</td>
                 <td className={batch.failed ? "font-semibold text-red-700" : ""}>{batch.failed}</td>
                 <td>

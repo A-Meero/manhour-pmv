@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Pencil, Plus } from "lucide-react";
 import { api, errorMessage } from "@/lib/client";
 import { Alert, Modal, StatusBadge } from "@/components/ui";
+import { SearchSelect } from "@/components/search-select";
 
 type User = {
   id: string;
@@ -181,12 +182,12 @@ function UserForm({
         </div>
         <div>
           <label className="label">Linked employee record</label>
-          <select className="input" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-            <option value="">— None —</option>
-            {options.map((employee) => (
-              <option key={employee.id} value={employee.id}>{employee.label}</option>
-            ))}
-          </select>
+          <SearchSelect
+            value={employeeId}
+            onChange={setEmployeeId}
+            placeholder="Search by file no. or name…"
+            options={options.map((employee) => ({ value: employee.id, label: employee.label }))}
+          />
           <p className="mt-1 text-xs text-gray-500">The user sees this employee&apos;s records as their own, and can record time on job cards by scanning their QR codes.</p>
         </div>
         {meIsAdmin && (

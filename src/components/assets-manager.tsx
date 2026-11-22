@@ -169,7 +169,7 @@ export function AssetsManager({
           <ImportPanel
             endpoint="/api/assets/import"
             templateUrl="/api/templates/assets"
-            description="One asset per row. Existing asset codes are skipped."
+            description="One asset per row. A code that already exists updates that asset from the filled-in cells; blank cells keep their current value."
             onImported={() => router.refresh()}
           />
         </Modal>

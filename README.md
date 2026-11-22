@@ -118,7 +118,7 @@ The bell at the top shows unread in-app notifications (refreshed every minute). 
   - the **asset** is found by code, then plate no., then chassis no. If none matches, **Create asset from this card** adds it (the rest of its details are completed on the Assets page), or another asset can be chosen;
   - an asset can have **only one open job card**. Only an admin can add a second one ("Add anyway"), and reopening a closed card follows the same rule.
 - The Excel import of job cards (Job Cards page) has the same columns; the asset must exist, and rows for an asset that already has an open card are rejected (except in an admin's import).
-- **Assets** (permissions "View assets" / "Manage assets"): code, description, category, location / department, make, model, serial, chassis, plate, year, purchase date, purchase value and **depreciation rate** (straight line, % of the purchase value per year). Add them one by one, import them from Excel, export the list.
+- **Assets** (permissions "View assets" / "Manage assets"): code, description, category, location / department, make, model, serial, chassis, plate, year, purchase date, purchase value and **depreciation rate** (straight line, % of the purchase value per year). Add them one by one, import them from Excel (a code that already exists updates that asset from the filled-in cells; blank cells keep their value), export the list.
 - The **asset page** shows its details, the **book value today**, the **total maintenance cost** (labour + parts of all its job cards), the cost **per month and per year**, and the **job card history** with dates, job type, HM/KM and cost of each card. Values and costs need "View costs & rates".
 
 ## Email

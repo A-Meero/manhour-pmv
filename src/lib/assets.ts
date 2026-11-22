@@ -203,19 +203,48 @@ export async function assetCosts(assetIds: string[]) {
 
 export type AssetImportInput = AssetBody & { row: number };
 
-/** Creates assets from Excel. Existing codes (and repeats in the file) are skipped, never updated. */
+/**
+ * Creates assets from Excel, or updates the asset when its code already exists.
+ * On an update only the filled-in cells change the asset; blank cells keep what is stored.
+ * A code repeated in the same file is skipped after its first row.
+ */
 export async function importAssets(items: AssetImportInput[], meta: { source: DataSource; actorId: string; fileName?: string }): Promise<ImportSummary> {
   const issues: ImportIssue[] = [];
   const codes = items.map((item) => normalizeCode(item.code));
-  const existing = new Set(
-    (await prisma.asset.findMany({ where: { code: { in: codes.filter(Boolean) } }, select: { code: true } })).map((a) => a.code),
+  const existing = new Map(
+    (await prisma.asset.findMany({ where: { code: { in: codes.filter(Boolean) } }, select: { id: true, code: true } })).map((a) => [a.code, a.id]),
   );
   const seen = new Set<string>();
   let created = 0;
+  let updated = 0;
   for (const [index, item] of items.entries()) {
     const code = codes[index];
-    if (code && (existing.has(code) || seen.has(code))) {
-      issues.push({ row: item.row, value: code, reason: existing.has(code) ? "Asset code already exists" : "Repeated in this import", status: "skipped" });
+    if (code && seen.has(code)) {
+      issues.push({ row: item.row, value: code, reason: "Repeated in this import", status: "skipped" });
+      continue;
+    }
+    const existingId = code ? existing.get(code) : undefined;
+    if (existingId) {
+      // Only the cells that have a value; the code is the key and stays as it is.
+      const filled = Object.fromEntries(
+        Object.entries(item).filter(
+          ([key, value]) => key !== "row" && key !== "code" && value !== null && value !== undefined && String(value).trim() !== "",
+        ),
+      ) as AssetBody;
+      const { data, errors } = readAsset(filled, true);
+      if (errors.length) {
+        issues.push({ row: item.row, value: code, reason: errors.join("; "), status: "failed" });
+        continue;
+      }
+      seen.add(code);
+      const { code: _key, ...changes } = data;
+      void _key;
+      if (Object.keys(changes).length === 0) {
+        issues.push({ row: item.row, value: code, reason: "Asset exists and the row has nothing to update", status: "skipped" });
+        continue;
+      }
+      await prisma.asset.update({ where: { id: existingId }, data: changes });
+      updated += 1;
       continue;
     }
     const { data, errors } = readAsset(item);
@@ -235,6 +264,7 @@ export async function importAssets(items: AssetImportInput[], meta: { source: Da
   const summary = {
     totalRows: items.length,
     created,
+    updated,
     skipped: issues.filter((issue) => issue.status === "skipped").length,
     failed: issues.filter((issue) => issue.status === "failed").length,
     issues,
