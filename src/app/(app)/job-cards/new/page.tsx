@@ -12,7 +12,7 @@ export default async function NewJobCardPage() {
     <>
       <PageHeader
         title="Add Job Card"
-        description="Photograph the printed job card: its details are read for you to check. The job card number must be new, and the asset must not already have an open job card."
+        description="Photograph the printed job card or upload its PDF: its details are read for you to check. The job card number must be new, and the asset must not already have an open job card."
       />
       <JobCardNew fields={fields as ClientField[]} isAdmin={user.isAdmin} />
     </>

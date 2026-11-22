@@ -48,7 +48,7 @@ export const emptyDraft = (): JobCardDraft => ({
   tasks: [],
 });
 
-const PROMPT = `This is a photo of a printed vehicle / equipment workshop "JOB CARD" form.
+const PROMPT = `This is a photo or PDF of a printed vehicle / equipment workshop "JOB CARD" form. If it has several pages, read the first job card only.
 Read ONLY the computer-printed (typed) text. IGNORE everything handwritten in pen (handwritten parts lists, technician names,
 signatures, handwritten dates, hours or numbers written over the form). If a box only contains handwriting, return "".
 

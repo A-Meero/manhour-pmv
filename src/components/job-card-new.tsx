@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, FileText, Keyboard, RotateCcw } from "lucide-react";
+import { Camera, FileText, Keyboard, RotateCcw, Upload } from "lucide-react";
 import { api, errorMessage } from "@/lib/client";
 import { Alert } from "@/components/ui";
 import { JobCardForm, type JobCardValues } from "@/components/job-card-form";
@@ -40,6 +40,7 @@ export function JobCardNew({ fields, isAdmin }: { fields: ClientField[]; isAdmin
   const [result, setResult] = useState<ReadResult | null>(null);
   const [preview, setPreview] = useState<{ url: string; pdf: boolean } | null>(null);
   const [formKey, setFormKey] = useState(0);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => () => {
@@ -53,7 +54,7 @@ export function JobCardNew({ fields, isAdmin }: { fields: ClientField[]; isAdmin
     setBusy(true);
     setError("");
     setResult(null);
-    setPreview({ url: URL.createObjectURL(file), pdf: file.type === "application/pdf" });
+    setPreview({ url: URL.createObjectURL(file), pdf: file.type === "application/pdf" || /\.pdf$/i.test(file.name) });
     try {
       const form = new FormData();
       form.append("image", file);
@@ -78,7 +79,7 @@ export function JobCardNew({ fields, isAdmin }: { fields: ClientField[]; isAdmin
       <div className="flex gap-1 border-b border-gray-200">
         {(
           [
-            ["photo", "Take a photo", Camera],
+            ["photo", "Photo or PDF", Camera],
             ["type", "Type it in", Keyboard],
           ] as const
         ).map(([id, label, Icon]) => (
@@ -96,12 +97,17 @@ export function JobCardNew({ fields, isAdmin }: { fields: ClientField[]; isAdmin
 
       {tab === "photo" && !result && (
         <div className="card mx-auto max-w-md space-y-3 p-5 text-center">
-          <button className="btn btn-primary w-full py-5 text-lg" disabled={busy} onClick={() => fileInput.current?.click()}>
+          <button className="btn btn-primary w-full py-5 text-lg" disabled={busy} onClick={() => cameraInput.current?.click()}>
             <Camera className="h-6 w-6" /> {busy ? "Reading the card…" : "Photograph the job card"}
           </button>
-          <input ref={fileInput} type="file" accept="image/*,application/pdf" capture="environment" className="hidden" onChange={onFile} />
+          <button className="btn w-full py-3" disabled={busy} onClick={() => fileInput.current?.click()}>
+            <Upload className="h-5 w-5" /> Upload a PDF or image
+          </button>
+          <input ref={cameraInput} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFile} />
+          <input ref={fileInput} type="file" accept="application/pdf,.pdf,image/jpeg,image/png,image/webp" className="hidden" onChange={onFile} />
           <p className="text-xs text-gray-500">
-            Take the photo straight on, with the whole card in the picture. Only the printed text is read; handwriting is ignored. A PDF of the card also works.
+            Take the photo straight on, with the whole card in the picture, or upload the card&apos;s PDF (if it has several pages, the first card is read). Only the
+            printed text is read; handwriting is ignored.
           </p>
           {busy && <p className="text-sm text-gray-600">This takes a few seconds…</p>}
           {error && <Alert>{error}</Alert>}
@@ -121,7 +127,7 @@ export function JobCardNew({ fields, isAdmin }: { fields: ClientField[]; isAdmin
                 <img src={preview.url} alt="Photo of the job card" className="w-full rounded-lg border border-gray-200" />
               ))}
             <button className="btn btn-sm" onClick={reset}>
-              <RotateCcw className="h-3.5 w-3.5" /> Use another photo
+              <RotateCcw className="h-3.5 w-3.5" /> Use another photo or PDF
             </button>
           </div>
           <div className="space-y-3">
@@ -129,7 +135,7 @@ export function JobCardNew({ fields, isAdmin }: { fields: ClientField[]; isAdmin
               <Alert kind="warning">{result.error}</Alert>
             ) : (
               <Alert kind="info">
-                Read by {result.engine}. Check every value against the photo before saving.
+                Read by {result.engine}. Check every value against the {preview?.pdf ? "PDF" : "photo"} before saving.
                 {result.warning && <span className="block text-xs">{result.warning}</span>}
               </Alert>
             )}

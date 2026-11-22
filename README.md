@@ -40,7 +40,7 @@ On start the container applies new database migrations (`prisma migrate deploy`)
 | Area | Permission | What it allows |
 |---|---|---|
 | Job cards | View job cards | Browse job cards, open a card, print QR labels |
-| | Add job cards | Add Job Card page (photo / typed) and the Excel import |
+| | Add job cards | Add Job Card page (photo, PDF upload or typed) and the Excel import |
 | | Edit job card details | Correct the printed details, link another asset, deactivate / delete unused cards |
 | | Close & reopen job cards | Any card (supervisors without it: cards their team worked on) |
 | Time | Technician | Start / stop work by scanning job card QR codes (login linked to an employee) |
@@ -112,7 +112,7 @@ The bell at the top shows unread in-app notifications (refreshed every minute). 
 
 ## Job cards and assets
 
-- **Add Job Card** (permission "Add job cards"): photograph the printed job card from the workshop system (a PDF of it also works). The AI providers from Settings › Photo reading read the **printed** header only and ignore handwriting: Rep.Order Number (= the job card number), Code (= asset code), description, plate, chassis, YoM, HM/KM readings, date in, job type, repair at, project, work done lines, operator, received by, created by. Everything is shown next to the photo to check before saving. **Type it in** is the same form without a photo. The photo stays linked to the card ("Original card").
+- **Add Job Card** (permission "Add job cards"): photograph the printed job card from the workshop system, or **upload its PDF** (if the PDF has several pages, the first job card is read; PDFs need a Gemini or Anthropic provider). The AI providers from Settings › Photo reading read the **printed** header only and ignore handwriting: Rep.Order Number (= the job card number), Code (= asset code), description, plate, chassis, YoM, HM/KM readings, date in, job type, repair at, project, work done lines, operator, received by, created by. Everything is shown next to the photo to check before saving. **Type it in** is the same form without a photo. The photo stays linked to the card ("Original card").
 - Checks before saving (repeated on the server):
   - the **job card number must be new**;
   - the **asset** is found by code, then plate no., then chassis no. If none matches, **Create asset from this card** adds it (the rest of its details are completed on the Assets page), or another asset can be chosen;
