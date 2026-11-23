@@ -1,10 +1,14 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Download, FileImage, Pencil, Printer, QrCode } from "lucide-react";
 import { prisma } from "@/lib/prisma";
-import { requirePage } from "@/lib/auth/guards";
+import { requireUser } from "@/lib/auth/guards";
 import {
   canBrowseJobCards,
+  canAssignJobCard,
+  canUploadDocument,
+  canRequestParts,
+  canViewJobCard,
   canEditJobCards,
   canViewAssets,
   canManageInventory,
@@ -26,22 +30,40 @@ import { PageHeader, SOURCE_LABEL } from "@/components/ui";
 import { JobCardStatusButton } from "@/components/job-card-status-button";
 import { AddSessionButton, SessionsTable } from "@/components/sessions-table";
 import { IssuePartsPanel } from "@/components/issue-parts-panel";
+import { PartRequestsPanel } from "@/components/part-requests-panel";
+import { QrAddParts } from "@/components/qr-add-parts";
+import { partRequestInclude, toClientRequest } from "@/lib/part-requests";
+import { REPAIR_TYPE_LABEL } from "@/lib/repair-type";
+import { teamOfLeader } from "@/lib/assignments";
+import { AssignmentsPanel } from "@/components/assignments-panel";
+import { DocumentUpload } from "@/components/document-upload";
 
 export const dynamic = "force-dynamic";
 
 const fmt = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
 export default async function JobCardDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requirePage(canBrowseJobCards);
+  const user = await requireUser();
   const { id } = await params;
   const card = await prisma.jobCard.findUnique({ where: { id }, include: {
       closedBy: { select: { name: true } },
       addedBy: { select: { name: true } },
       asset: { select: { id: true, code: true, description: true, plateNo: true } },
       tasks: { orderBy: { line: "asc" } },
+      receivedByEmployee: { select: { fileNo: true, name: true } },
+      partRequests: { include: partRequestInclude, orderBy: { createdAt: "desc" } },
+      assignments: { include: { employee: { select: { id: true, fileNo: true, name: true } } }, orderBy: { createdAt: "asc" } },
     },
   });
   if (!card) notFound();
+  // Its received-by employee and their supervisors may open the card (to request parts) without "View job cards".
+  if (!canViewJobCard(user, { receivedById: card.receivedById, assignedEmployeeIds: card.assignments.map((a) => a.employeeId) })) {
+    redirect("/unauthorized");
+  }
+  const mayAssign = canAssignJobCard(user, card);
+  const needsDocument = card.documentRequired && !card.photoPath && card.active;
+  const mayUpload = canUploadDocument(user);
+  const team = mayAssign ? await teamOfLeader(card.receivedById) : [];
   await autoStopStale({ jobCardId: card.id });
 
   // "View all records" / "Review all sessions" see everyone; supervisors their employees; a store manager only the parts.
@@ -90,7 +112,7 @@ export default async function JobCardDetailPage({ params }: { params: Promise<{ 
         }
         actions={
           <>
-            <Link href="/job-cards" className="btn">All job cards</Link>
+            {canBrowseJobCards(user) && <Link href="/job-cards" className="btn">All job cards</Link>}
             {canEditJobCards(user) && (
               <Link href={`/job-cards/${card.id}/edit`} className="btn">
                 <Pencil className="h-4 w-4" /> Edit details
@@ -100,6 +122,12 @@ export default async function JobCardDetailPage({ params }: { params: Promise<{ 
           </>
         }
       />
+
+      {needsDocument && (
+        <div className="mb-5">
+          <DocumentUpload jobCardId={card.id} needed canUpload={mayUpload} />
+        </div>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-3">
         <div className="card flex flex-col items-center gap-3 p-4 text-center">
@@ -153,11 +181,14 @@ export default async function JobCardDetailPage({ params }: { params: Promise<{ 
       <div className="card mt-5 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-semibold">Card details</h2>
-          {card.photoPath && (
-            <a className="btn btn-sm" href={`/api/job-cards/${card.id}/photo`} target="_blank" rel="noreferrer">
-              <FileImage className="h-3.5 w-3.5" /> Original card
-            </a>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {card.photoPath && (
+              <a className="btn btn-sm" href={`/api/job-cards/${card.id}/photo`} target="_blank" rel="noreferrer">
+                <FileImage className="h-3.5 w-3.5" /> {card.documentRequired ? "Document" : "Original card"}
+              </a>
+            )}
+            {card.photoPath && <DocumentUpload jobCardId={card.id} needed={false} canUpload={mayUpload} replace />}
+          </div>
         </div>
         <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-4">
           <Detail label="Asset">
@@ -176,6 +207,7 @@ export default async function JobCardDetailPage({ params }: { params: Promise<{ 
             )}
           </Detail>
           {card.asset?.plateNo && <Detail label="Plate no.">{card.asset.plateNo}</Detail>}
+          <Detail label="Type">{card.repairType ? `${REPAIR_TYPE_LABEL[card.repairType]} repair` : ""}</Detail>
           <Detail label="Date in">{formatDate(card.dateIn)}</Detail>
           <Detail label="Date out">{formatDate(card.dateOut)}</Detail>
           <Detail label="Job type">{card.jobType}</Detail>
@@ -184,7 +216,18 @@ export default async function JobCardDetailPage({ params }: { params: Promise<{ 
           <Detail label="Repair at">{card.repairAt}</Detail>
           <Detail label="Project">{card.project}</Detail>
           <Detail label="Operator">{card.operatorName}</Detail>
-          <Detail label="Received by">{card.receivedBy}</Detail>
+          <Detail label="Received by">
+            {card.receivedByEmployee ? (
+              <>
+                {card.receivedByEmployee.fileNo} – {card.receivedByEmployee.name}
+                {card.receivedBy && card.receivedBy.toUpperCase() !== card.receivedByEmployee.name.toUpperCase() && (
+                  <span className="block text-xs font-normal text-gray-500">On the card: {card.receivedBy}</span>
+                )}
+              </>
+            ) : (
+              card.receivedBy
+            )}
+          </Detail>
           <Detail label="Created by (card)">{card.createdByName}</Detail>
           <Detail label="Added to this system">
             {formatDateTime(card.createdAt)}
@@ -204,6 +247,26 @@ export default async function JobCardDetailPage({ params }: { params: Promise<{ 
             </ol>
           </div>
         )}
+      </div>
+
+      <div className="mt-5">
+        <AssignmentsPanel
+          jobCardId={card.id}
+          assigned={card.assignments.map((a) => ({ id: a.employee.id, label: `${a.employee.fileNo} – ${a.employee.name}` }))}
+          team={team.map((e) => ({ id: e.id, label: `${e.fileNo} – ${e.name}` }))}
+          canAssign={mayAssign}
+          leaderName={card.receivedByEmployee?.name ?? null}
+        />
+      </div>
+
+      <div className="mt-5">
+        <PartRequestsPanel
+          jobCardId={card.id}
+          requests={card.partRequests.map(toClientRequest)}
+          canRequest={canRequestParts(user, card)}
+          isStore={isStore}
+          cardOpen={card.status === "OPEN" && card.active}
+        />
       </div>
 
       {seesPeople && (
@@ -262,7 +325,12 @@ export default async function JobCardDetailPage({ params }: { params: Promise<{ 
       )}
 
       {(isStore || showCosts) && (
-        <div className="mt-5">
+        <div className="mt-5 space-y-3">
+          {isStore && card.active && (card.status === "OPEN" || isAdmin(user)) && (
+            <div className="flex justify-end">
+              <QrAddParts jobCardId={card.id} jobCardCode={card.code} />
+            </div>
+          )}
           <IssuePartsPanel jobCardId={card.id} closed={card.status === "CLOSED" && !isAdmin(user)} issued={lines} canIssue={isStore} />
         </div>
       )}

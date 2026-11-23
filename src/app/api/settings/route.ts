@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { canManageSettings } from "@/lib/auth/access";
 import { HttpError, readJson, withUser } from "@/lib/http";
-import { saveSettings } from "@/lib/settings";
+import { saveSettings, splitWords } from "@/lib/settings";
 import { audit } from "@/lib/audit";
 import { LOGGING_METHODS, LOGGING_METHOD_INFO, type LoggingMethod } from "@/lib/logging-methods";
 
@@ -15,6 +15,7 @@ type Body = {
   appBaseUrl?: string;
   shiftAlerts?: boolean;
   shiftGraceMinutes?: string;
+  workshopWords?: string;
 };
 
 function limit(value: string | undefined, label: string) {
@@ -70,6 +71,11 @@ export const PUT = withUser(async (request, user) => {
       throw new HttpError(400, "Grace period must be a whole number of minutes between 0 and 240.");
     }
     values.shiftGraceMinutes = String(minutes);
+  }
+  if (body.workshopWords !== undefined) {
+    const words = splitWords(String(body.workshopWords));
+    if (words.some((word) => word.length > 60) || words.length > 50) throw new HttpError(400, "Workshop words: up to 50 words of 60 characters each.");
+    values.workshopWords = words.join(", ");
   }
   await saveSettings(values);
   await audit(user.id, "SETTINGS_UPDATED", "Setting", "", values);

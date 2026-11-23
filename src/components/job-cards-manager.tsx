@@ -8,6 +8,7 @@ import { api, errorMessage } from "@/lib/client";
 import { Alert, Modal, SOURCE_LABEL, StatusBadge } from "@/components/ui";
 import { ImportPanel } from "@/components/import-panel";
 import { CustomFieldInputs, formatFieldValue, type ClientField, type FieldValues } from "@/components/custom-field-inputs";
+import { REPAIR_TYPE_LABEL, type RepairTypeValue } from "@/lib/repair-type";
 
 type Card = {
   id: string;
@@ -21,6 +22,8 @@ type Card = {
   asset: { id: string; code: string; description: string } | null;
   dateIn: string | null;
   jobType: string;
+  repairType: RepairTypeValue | null;
+  needsDocument: boolean;
   /** records + sessions + issued parts: the card can no longer be deleted */
   inUse: number;
   createdAt: string;
@@ -35,7 +38,7 @@ export function JobCardsManager({
 }: {
   cards: Card[];
   fields: ClientField[];
-  filters: { q: string; status: string };
+  filters: { q: string; status: string; type: string };
   canAdd: boolean;
   canEdit: boolean;
 }) {
@@ -76,6 +79,12 @@ export function JobCardsManager({
             <option value="closed">Closed</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
+            <option value="nodoc">Needs document</option>
+          </select>
+          <select name="type" defaultValue={filters.type} className="input sm:w-40">
+            <option value="">Both types</option>
+            <option value="WORKSHOP">Workshop</option>
+            <option value="ONSITE">Onsite</option>
           </select>
           <button className="btn">Search</button>
         </form>
@@ -104,6 +113,7 @@ export function JobCardsManager({
             <tr>
               <th>Job card</th>
               <th>Asset</th>
+              <th>Type</th>
               <th>Date in</th>
               <th>Job type</th>
               {fields.map((field) => (
@@ -118,13 +128,18 @@ export function JobCardsManager({
           <tbody>
             {cards.length === 0 && (
               <tr>
-                <td colSpan={8 + fields.length} className="py-8 text-center text-gray-500">No job cards found.</td>
+                <td colSpan={9 + fields.length} className="py-8 text-center text-gray-500">No job cards found.</td>
               </tr>
             )}
             {cards.map((card) => (
               <tr key={card.id}>
                 <td className="font-mono font-semibold">
                   <Link href={`/job-cards/${card.id}`} className="text-brand hover:underline">{card.code}</Link>
+                  {card.needsDocument && (
+                    <Link href={`/job-cards/${card.id}`} className="mt-0.5 block w-fit rounded-full bg-amber-300 px-2 font-sans text-[10px] font-bold uppercase tracking-wide text-amber-950">
+                      Upload document
+                    </Link>
+                  )}
                 </td>
                 <td>
                   {card.asset ? (
@@ -136,6 +151,7 @@ export function JobCardsManager({
                     <span className="text-gray-400">—</span>
                   )}
                 </td>
+                <td>{card.repairType ? REPAIR_TYPE_LABEL[card.repairType] : ""}</td>
                 <td className="whitespace-nowrap">{card.dateIn ? card.dateIn.split("-").reverse().join("/") : ""}</td>
                 <td>{card.jobType}</td>
                 {fields.map((field) => (

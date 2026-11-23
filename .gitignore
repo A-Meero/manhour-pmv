@@ -6,3 +6,6 @@ tessdata/*.traineddata
 next-env.d.ts
 *.tsbuildinfo
 .env.docker
+
+# HTTPS front settings (docker compose --profile https)
+.env.https

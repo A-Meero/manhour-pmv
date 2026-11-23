@@ -22,6 +22,8 @@ export type AppSettings = {
   shiftAlerts: boolean;
   /** Minutes after the shift end before that happens */
   shiftGraceMinutes: number;
+  /** "Repair at" containing one of these (case ignored) makes a job card a workshop repair; anything else is onsite */
+  workshopWords: string[];
 };
 
 const DEFAULTS = {
@@ -37,6 +39,7 @@ const DEFAULTS = {
   appBaseUrl: "",
   shiftAlerts: "on",
   shiftGraceMinutes: "15",
+  workshopWords: "GARAGE, WORKSHOP",
 };
 
 export type SettingKey = keyof typeof DEFAULTS;
@@ -45,6 +48,11 @@ function toLimit(value: string): number | null {
   if (value.trim() === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+/** "GARAGE, workshop;yard" → ["GARAGE", "WORKSHOP", "YARD"] */
+export function splitWords(value: string) {
+  return Array.from(new Set(value.split(/[,;\n]+/).map((word) => word.trim().replace(/\s+/g, " ").toUpperCase()).filter(Boolean)));
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -69,6 +77,7 @@ export async function getSettings(): Promise<AppSettings> {
     appBaseUrl: map.appBaseUrl.trim().replace(/\/+$/, ""),
     shiftAlerts: map.shiftAlerts !== "off",
     shiftGraceMinutes: Number.isInteger(grace) && grace >= 0 && grace <= 240 ? grace : 15,
+    workshopWords: splitWords(map.workshopWords),
   };
 }
 

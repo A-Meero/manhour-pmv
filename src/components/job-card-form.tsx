@@ -3,10 +3,21 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CheckCircle2, Plus, Save, Search, Trash2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Plus, QrCode, Save, Search, Trash2, X } from "lucide-react";
 import { api, errorMessage } from "@/lib/client";
-import { Alert } from "@/components/ui";
+import { Alert, Modal } from "@/components/ui";
 import { CustomFieldInputs, type ClientField, type FieldValues } from "@/components/custom-field-inputs";
+import { SearchSelect } from "@/components/search-select";
+import { LiveQrScanner } from "@/components/live-qr-scanner";
+import { guessRepairType, REPAIR_TYPE_LABEL, REPAIR_TYPES, type RepairTypeValue } from "@/lib/repair-type";
+import { parseQr } from "@/lib/qr-codes";
+
+/** Lists the form needs from the server (see jobCardFormOptions) */
+export type JobCardFormOptions = {
+  employees: { value: string; label: string }[];
+  allowedTypes: RepairTypeValue[];
+  workshopWords: string[];
+};
 
 /** Values of the job card form (strings, dates as YYYY-MM-DD). Shared by "Add job card" and "Edit details". */
 export type JobCardValues = {
@@ -27,6 +38,10 @@ export type JobCardValues = {
   project: string;
   operatorName: string;
   receivedBy: string;
+  /** The employee "Received by" refers to ("" = none / not chosen yet) */
+  receivedById: string;
+  /** "" = not chosen yet (suggested from "Repair at") */
+  repairType: "" | RepairTypeValue;
   createdByName: string;
   tasks: { description: string; fromDate: string }[];
   customFields: FieldValues;
@@ -37,6 +52,7 @@ type Check = {
   existing: { id: string; code: string } | null;
   asset: (AssetLite & { by: "code" | "plate" | "chassis" | "chosen" }) | null;
   openCard: { id: string; code: string; dateIn: string } | null;
+  receiver: { id: string; label: string } | null;
 };
 
 const BY_LABEL = { code: "by asset code", plate: "by plate no.", chassis: "by chassis no.", chosen: "chosen" } as const;
@@ -50,6 +66,7 @@ export function JobCardForm({
   isAdmin,
   photoPath,
   cardStatus,
+  options,
 }: {
   mode: "new" | "edit";
   initial: JobCardValues;
@@ -59,9 +76,15 @@ export function JobCardForm({
   /** Stored photo from read-photo (new cards) */
   photoPath?: string;
   cardStatus?: "OPEN" | "CLOSED";
+  options: JobCardFormOptions;
 }) {
   const router = useRouter();
   const [v, setV] = useState<JobCardValues>(initial);
+  // Type: suggested from "Repair at" until the user picks one. Received by: matched from the printed name until picked.
+  const [typeTouched, setTypeTouched] = useState(!!initial.repairType);
+  const [receiverTouched, setReceiverTouched] = useState(mode === "edit" || !!initial.receivedById);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState("");
   // "auto" = use whatever the check matched; "chosen" = picked by hand; "new" = create from the card; "none" = no asset
   const [assetMode, setAssetMode] = useState<"auto" | "chosen" | "new" | "none">(initial.assetId ? "chosen" : "auto");
   const [check, setCheck] = useState<Check | null>(null);
@@ -86,7 +109,7 @@ export function JobCardForm({
   );
 
   // Live checks (debounced): number taken, asset match, open card on the asset.
-  const checkKey = JSON.stringify([v.code, assetMode === "chosen" ? v.assetId : "", v.assetCode, v.plateNo, v.chassisNo, assetMode]);
+  const checkKey = JSON.stringify([v.code, assetMode === "chosen" ? v.assetId : "", v.assetCode, v.plateNo, v.chassisNo, assetMode, receiverTouched ? "" : v.receivedBy]);
   useEffect(() => {
     if (assetMode === "new" && !v.code) return;
     const timer = setTimeout(async () => {
@@ -96,6 +119,7 @@ export function JobCardForm({
           body: {
             code: v.code,
             exceptId: jobCardId,
+            ...(receiverTouched ? {} : { receivedBy: v.receivedBy }),
             ...(assetMode === "chosen" ? { assetId: v.assetId } : assetMode === "auto" ? { assetCode: v.assetCode, plateNo: v.plateNo, chassisNo: v.chassisNo } : {}),
           },
         });
@@ -118,7 +142,43 @@ export function JobCardForm({
     assetMode !== "new" &&
     assetMode !== "none" &&
     (mode === "new" || (cardStatus === "OPEN" && matched?.id !== initial.assetId));
-  const blocked = numberTaken || (openConflict && !(isAdmin && allowSecondOpen)) || !v.code.trim() || (assetMode === "new" && !newAsset.code.trim());
+  const guessedType = guessRepairType(v.repairAt, options.workshopWords);
+  const repairType: "" | RepairTypeValue = typeTouched ? v.repairType : (guessedType ?? v.repairType);
+  // Editing keeps the card's current type available even without the permission to create it.
+  const typeChoices = REPAIR_TYPES.filter((type) => options.allowedTypes.includes(type) || (mode === "edit" && type === initial.repairType));
+  const typeAllowed = !!repairType && typeChoices.includes(repairType);
+  const typeRequired = mode === "new" || !!initial.repairType;
+  const receivedById = receiverTouched ? v.receivedById : (check?.receiver?.id ?? "");
+  const blocked =
+    numberTaken ||
+    (openConflict && !(isAdmin && allowSecondOpen)) ||
+    !v.code.trim() ||
+    (assetMode === "new" && !newAsset.code.trim()) ||
+    (typeRequired && !typeAllowed);
+
+  function onAssetQr(text: string) {
+    const target = parseQr(text, "asset");
+    if (target?.kind !== "asset") return false;
+    setScanError("");
+    api<{ asset: { id: string; code: string; description: string; plateNo: string; chassisNo: string; yearOfMake: number | null } }>(
+      `/api/assets/by-code?code=${encodeURIComponent(target.code)}`,
+    )
+      .then(({ asset }) => {
+        setV((current) => ({
+          ...current,
+          assetId: asset.id,
+          assetCode: asset.code,
+          description: asset.description,
+          plateNo: asset.plateNo,
+          chassisNo: asset.chassisNo,
+          yearOfMake: asset.yearOfMake ? String(asset.yearOfMake) : "",
+        }));
+        setAssetMode("chosen");
+        setScanning(false);
+      })
+      .catch((err) => setScanError(errorMessage(err)));
+    return true;
+  }
 
   async function save() {
     setBusy(true);
@@ -134,6 +194,8 @@ export function JobCardForm({
       project: v.project,
       operatorName: v.operatorName,
       receivedBy: v.receivedBy,
+      receivedById,
+      ...(repairType ? { repairType } : {}),
       createdByName: v.createdByName,
       tasks: v.tasks.filter((t) => t.description.trim()),
       customFields: v.customFields,
@@ -186,16 +248,96 @@ export function JobCardForm({
           {input("repairAt", "Repair at")}
           {input("project", "Project")}
           {input("operatorName", "Operator name")}
-          {input("receivedBy", "Received by")}
           {input("createdByName", "Created by (on the card)")}
+        </div>
+
+        <fieldset>
+          <legend className="label">Repair type{typeRequired && " *"}</legend>
+          <div className="flex flex-wrap gap-2">
+            {REPAIR_TYPES.map((type) => {
+              const allowed = typeChoices.includes(type);
+              return (
+                <label
+                  key={type}
+                  className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${repairType === type ? "border-brand bg-brand-soft font-medium" : "border-gray-200"} ${allowed ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}
+                >
+                  <input
+                    type="radio"
+                    name="repairType"
+                    value={type}
+                    checked={repairType === type}
+                    disabled={!allowed}
+                    onChange={() => {
+                      setTypeTouched(true);
+                      set("repairType", type);
+                    }}
+                  />
+                  {REPAIR_TYPE_LABEL[type]} repair
+                </label>
+              );
+            })}
+          </div>
+          {!typeTouched && guessedType && (
+            <p className="mt-1 text-xs text-gray-500">Suggested from &quot;Repair at&quot;. Change it if it&apos;s wrong.</p>
+          )}
+          {repairType && !typeAllowed && (
+            <p className="mt-1 text-xs font-medium text-red-700">
+              You are not allowed to create {REPAIR_TYPE_LABEL[repairType].toLowerCase()} repair job cards.
+              {typeChoices.length ? " Choose the other type if that is correct, or ask someone who may." : ""}
+            </p>
+          )}
+          {!repairType && typeRequired && <p className="mt-1 text-xs text-gray-500">Choose Workshop or Onsite.</p>}
+        </fieldset>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          {input("receivedBy", "Received by (on the card)")}
+          <div>
+            <span className="label">Received by (employee)</span>
+            <SearchSelect
+              value={receivedById}
+              options={options.employees}
+              placeholder="Search by file no. or name…"
+              onChange={(id) => {
+                setReceiverTouched(true);
+                set("receivedById", id);
+              }}
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              {!receiverTouched && check?.receiver
+                ? "Matched from the name on the card. They get a notification and can request spare parts."
+                : "Gets a notification and can request spare parts for this card."}
+            </p>
+          </div>
         </div>
       </div>
 
       <div className="card space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-semibold">Asset</h2>
-          {checking && <span className="text-xs text-gray-500">Checking…</span>}
+          <div className="flex items-center gap-2">
+            {checking && <span className="text-xs text-gray-500">Checking…</span>}
+            {mode === "new" && !photoPath && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  setScanError("");
+                  setScanning(true);
+                }}
+              >
+                <QrCode className="h-3.5 w-3.5" /> Scan asset QR
+              </button>
+            )}
+          </div>
         </div>
+        {scanning && (
+          <Modal title="Scan the asset's QR code" onClose={() => setScanning(false)}>
+            <div className="space-y-3">
+              <LiveQrScanner onDetect={onAssetQr} hint="Point the camera at the QR label on the vehicle or equipment." unknownMessage="This is not an asset QR code." />
+              {scanError && <Alert>{scanError}</Alert>}
+            </div>
+          </Modal>
+        )}
 
         {assetMode !== "new" && (
           <div className="grid gap-3 sm:grid-cols-3">
@@ -237,7 +379,7 @@ export function JobCardForm({
               <span>
                 <b className="font-mono">{matched.code}</b> {matched.description}
                 <span className="block text-xs text-gray-600">
-                  Matched {BY_LABEL[matched.by]}
+                  {matched.by === "chosen" ? "Chosen" : `Matched ${BY_LABEL[matched.by]}`}
                   {matched.plateNo && ` · Plate ${matched.plateNo}`}
                   {!matched.active && " · inactive asset"}
                 </span>

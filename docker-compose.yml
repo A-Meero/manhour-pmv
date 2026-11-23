@@ -26,3 +26,33 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+
+  # Optional HTTPS front (live QR camera on phones). Off unless started with:
+  #   docker compose --profile https up -d
+  # Set HTTPS_HOST in .env.https (see .env.https.example), then open https://<HTTPS_HOST>:3443
+  https:
+    image: caddy:2.8.4-alpine
+    container_name: manhour-https
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "3443:3443"
+    env_file:
+      - path: .env.https
+        required: false
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  # Caddy's certificate authority and certificates: keep them, or phones must trust a new root certificate
+  caddy_data:
+  caddy_config:

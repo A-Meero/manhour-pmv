@@ -2,14 +2,25 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
+import { sendPush } from "@/lib/push";
 
-export type NotificationKind = "SHIFT_REMINDER" | "LIMIT_STOP" | "LOW_STOCK" | "SESSION_REVIEW";
+export type NotificationKind =
+  | "SHIFT_REMINDER"
+  | "LIMIT_STOP"
+  | "LOW_STOCK"
+  | "SESSION_REVIEW"
+  | "JOB_CARD_RECEIVED"
+  | "PART_REQUEST"
+  | "PART_REQUEST_UPDATE"
+  | "JOB_CARD_ASSIGNED"
+  | "DOCUMENT_NEEDED"
+  | "TEST";
 
 type Client = Prisma.TransactionClient | typeof prisma;
 
 /**
- * Sends an in-app notification to each user. With a dedupeKey, a user gets that event only once
- * (e.g. one reminder per work session), however many times this runs.
+ * Sends an in-app notification to each user, and a push notification to their subscribed devices (unless muted).
+ * With a dedupeKey, a user gets that event only once (e.g. one reminder per work session), however many times this runs.
  */
 export async function notify(
   userIds: string[],
@@ -18,6 +29,12 @@ export async function notify(
 ) {
   const ids = Array.from(new Set(userIds.filter(Boolean)));
   if (!ids.length) return 0;
+  // Users who already had this event don't get it pushed again.
+  const already = message.dedupeKey
+    ? new Set((await db.notification.findMany({ where: { userId: { in: ids }, dedupeKey: message.dedupeKey }, select: { userId: true } })).map((n) => n.userId))
+    : new Set<string>();
+  const fresh = ids.filter((id) => !already.has(id));
+  if (fresh.length) void sendPush(fresh, message);
   const result = await db.notification.createMany({
     data: ids.map((userId) => ({
       userId,
@@ -49,6 +66,30 @@ export async function usersWithPermission(permission: string, db: Client = prism
     select: { id: true },
   });
   return users.map((u) => u.id);
+}
+
+/** Active logins linked to an employee */
+export async function usersOfEmployee(employeeId: string, db: Client = prisma) {
+  const users = await db.user.findMany({ where: { employeeId, active: true }, select: { id: true } });
+  return users.map((u) => u.id);
+}
+
+/** Tells the received-by employee (their login, if they have one) that a job card was received by them. */
+export async function notifyReceivedBy(card: {
+  id: string;
+  code: string;
+  receivedById: string | null;
+  asset?: { code: string; description: string } | null;
+}) {
+  if (!card.receivedById) return 0;
+  const asset = card.asset ? ` (${[card.asset.code, card.asset.description].filter(Boolean).join(" – ")})` : "";
+  return notify(await usersOfEmployee(card.receivedById), {
+    kind: "JOB_CARD_RECEIVED",
+    title: `Job card ${card.code}${asset} was received by you`,
+    body: "Open it to see the details or to request spare parts from the store.",
+    link: `/job-cards/${card.id}`,
+    dedupeKey: `received:${card.id}:${card.receivedById}`,
+  });
 }
 
 export async function unreadCount(userId: string) {

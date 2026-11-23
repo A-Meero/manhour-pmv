@@ -10,6 +10,9 @@ import { formatMoney } from "@/lib/money";
 import { AssetEditButton } from "@/components/asset-edit-button";
 import { ColumnChart } from "@/components/charts";
 import { PageHeader, StatusBadge } from "@/components/ui";
+import { QrCard } from "@/components/qr-card";
+import { appOrigin, assetLink, qrDataUrl } from "@/lib/qr";
+import { REPAIR_TYPE_LABEL } from "@/lib/repair-type";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const monthLabel = (key: string) => `${MONTHS[Number(key.slice(5, 7)) - 1]} ${key.slice(0, 4)}`;
@@ -24,6 +27,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   });
   if (!asset) notFound();
   const showCosts = canViewCosts(user);
+  const qr = await qrDataUrl(assetLink(await appOrigin(), asset.code), 320);
   const linkCards = canBrowseJobCards(user);
   const costs = showCosts ? await assetCosts([asset.id]) : null;
   const totals = costs?.byAsset.get(asset.id) ?? { labour: 0, parts: 0, total: 0 };
@@ -81,6 +85,16 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
             </div>
           </dl>
           {asset.notes && <p className="mt-3 whitespace-pre-line text-sm text-gray-700">{asset.notes}</p>}
+        </div>
+
+        <div className="lg:order-last lg:col-span-3">
+          <QrCard
+            dataUrl={qr}
+            alt={`QR code for asset ${asset.code}`}
+            caption="Stick this on the vehicle or equipment. Scanning it opens this page; on the Add Job Card form (Type it in) it fills in the asset."
+            labelHref={`/api/templates/asset-labels?ids=${asset.id}`}
+            downloadName={`asset-${asset.code}-qr.png`}
+          />
         </div>
 
         {showCosts && (
@@ -152,6 +166,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                 <th>Job card</th>
                 <th>Date in</th>
                 <th>Date out</th>
+                <th>Type</th>
                 <th>Job type</th>
                 <th>Project</th>
                 <th className="text-right">Prev. HM/KM</th>
@@ -178,6 +193,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                     </td>
                     <td>{formatDate(card.dateIn)}</td>
                     <td>{formatDate(card.dateOut ?? card.closedAt)}</td>
+                    <td>{card.repairType ? REPAIR_TYPE_LABEL[card.repairType] : ""}</td>
                     <td>{card.jobType}</td>
                     <td>{card.project}</td>
                     <td className="text-right">{reading(card.previousReading)}</td>

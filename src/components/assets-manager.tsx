@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, Pencil, Plus, Upload } from "lucide-react";
+import { Download, Pencil, Plus, Printer, Upload } from "lucide-react";
 import { api, errorMessage } from "@/lib/client";
 import { Alert, Modal, StatusBadge } from "@/components/ui";
 import { ImportPanel } from "@/components/import-panel";
@@ -80,6 +80,15 @@ export function AssetsManager({
           <button className="btn">Search</button>
         </form>
         <div className="flex flex-wrap gap-2">
+          <a
+            className="btn"
+            href={`/api/templates/asset-labels${filters.q || filters.category || filters.location || filters.show !== "active" ? `?ids=${assets.map((asset) => asset.id).join(",")}` : ""}`}
+            target="_blank"
+            rel="noreferrer"
+            title="QR labels for the listed assets"
+          >
+            <Printer className="h-4 w-4" /> Print QR labels
+          </a>
           <a className="btn" href="/api/assets/export" download>
             <Download className="h-4 w-4" /> Export
           </a>

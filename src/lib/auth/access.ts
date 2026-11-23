@@ -1,6 +1,7 @@
 import type { CurrentUser } from "@/lib/auth/session";
 import type { LoggingMethod } from "@/lib/logging-methods";
 import type { Permission } from "@/lib/permissions";
+import { REPAIR_TYPES, type RepairTypeValue } from "@/lib/repair-type";
 
 /** "ALL" = no restriction, otherwise the list of employee ids the user may act on. */
 export type EmployeeScope = "ALL" | string[];
@@ -16,7 +17,17 @@ export const isSupervisor = (user: CurrentUser) => user.supervisedEmployeeIds.le
 export const canManageSettings = isAdmin;
 export const canManageEmployees = (user: CurrentUser) => can(user, "employees.manage");
 export const canManageUsers = (user: CurrentUser) => can(user, "users.manage");
-export const canAddJobCards = (user: CurrentUser) => can(user, "jobcards.add");
+/** Job card types this user may create (workshop / onsite repairs) */
+export function allowedRepairTypes(user: CurrentUser): RepairTypeValue[] {
+  return REPAIR_TYPES.filter((type) => can(user, type === "WORKSHOP" ? "jobcards.workshop" : "jobcards.onsite"));
+}
+export const canCreateRepairType = (user: CurrentUser, type: RepairTypeValue) => allowedRepairTypes(user).includes(type);
+/** From a photo / PDF of the printed card, or the Excel import */
+export const canAddByPhoto = (user: CurrentUser) => can(user, "jobcards.add") && allowedRepairTypes(user).length > 0;
+/** The "Type it in" form */
+export const canAddTyped = (user: CurrentUser) => can(user, "jobcards.addTyped") && allowedRepairTypes(user).length > 0;
+/** Any way of adding job cards */
+export const canAddJobCards = (user: CurrentUser) => canAddByPhoto(user) || canAddTyped(user);
 export const canEditJobCards = (user: CurrentUser) => can(user, "jobcards.edit");
 export const canViewAnalytics = (user: CurrentUser) => can(user, "analytics.view");
 export const canEditRecords = (user: CurrentUser) => can(user, "records.edit");
@@ -33,6 +44,24 @@ export const reviewsAllSessions = (user: CurrentUser) => can(user, "sessions.rev
 
 /** "Close job cards" closes any card; supervisors without it close only cards their team worked on (src/lib/job-cards.ts). */
 export const mayCloseJobCards = (user: CurrentUser) => can(user, "jobcards.close") || isSupervisor(user);
+/** The received-by employee's own login, or one of that employee's supervisors */
+export function isReceiverOrSupervisor(user: CurrentUser, receivedById: string | null | undefined) {
+  if (!receivedById) return false;
+  return user.employeeId === receivedById || user.supervisedEmployeeIds.includes(receivedById);
+}
+/** Part requests on a job card: the received-by employee's user, their supervisors, admins */
+export const canRequestParts = (user: CurrentUser, card: { receivedById: string | null }) =>
+  user.isAdmin || isReceiverOrSupervisor(user, card.receivedById);
+/** Open one job card's page: anyone who can browse job cards, its received-by leader (and supervisors), and its assigned members */
+export const canViewJobCard = (user: CurrentUser, card: { receivedById: string | null; assignedEmployeeIds?: string[] }) =>
+  canBrowseJobCards(user) ||
+  isReceiverOrSupervisor(user, card.receivedById) ||
+  (!!user.employeeId && !!card.assignedEmployeeIds?.includes(user.employeeId));
+/** Assign a job card to team members: its received-by team leader, and admins */
+export const canAssignJobCard = (user: CurrentUser, card: { receivedById: string | null }) =>
+  user.isAdmin || (!!card.receivedById && user.employeeId === card.receivedById);
+/** Upload / replace a job card's document: anyone who adds or edits job cards, and admins */
+export const canUploadDocument = (user: CurrentUser) => canAddJobCards(user) || canEditJobCards(user);
 /** Fix / review QR work sessions (supervisors: only their employees' sessions) */
 export const canReviewSessions = (user: CurrentUser) => reviewsAllSessions(user) || isSupervisor(user);
 /** Read-only list of job cards (to find a card, print its QR, see its details) */
@@ -57,8 +86,22 @@ export function canScanTime(user: CurrentUser, methods: Record<LoggingMethod, bo
 /** People who see others' records can search by person; everyone else only sees their own. */
 export const canSearchPeople = (user: CurrentUser) => seesAllRecords(user) || isSupervisor(user);
 
-/** The in-portal scanner: technicians (when QR is on), store managers, and people who work with job cards. */
+/** What the in-portal scanner opens for this user: job cards, assets, inventory items. */
+export function scanKinds(user: CurrentUser, methods: Record<LoggingMethod, boolean>) {
+  const kinds: ("jobcard" | "asset" | "part")[] = [];
+  if (canUseJobCardScan(user, methods)) kinds.push("jobcard");
+  if (canViewAssets(user)) kinds.push("asset");
+  if (canManageInventory(user)) kinds.push("part");
+  return kinds;
+}
+
+/** The in-portal scanner: anyone it can open something for. */
 export function canUseScanPage(user: CurrentUser, methods: Record<LoggingMethod, boolean>) {
+  return scanKinds(user, methods).length > 0;
+}
+
+/** Scanning job card QRs: technicians (when QR is on), store managers, and people who work with job cards. */
+function canUseJobCardScan(user: CurrentUser, methods: Record<LoggingMethod, boolean>) {
   return canScanTime(user, methods) || canManageInventory(user) || mayCloseJobCards(user) || can(user, "jobcards.view");
 }
 

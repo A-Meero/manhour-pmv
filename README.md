@@ -31,6 +31,22 @@ docker compose up -d --build
 
 On start the container applies new database migrations (`prisma migrate deploy`) and then starts the app, together with the background checks for shift ends and stale QR sessions. Email needs the variables from the **Email** section in `.env.docker`. Set `DISABLE_SCHEDULER="true"` only if another copy of the app already runs the checks.
 
+### HTTPS (needed for the live QR camera)
+
+Phone browsers only open the live camera on `https://` pages. On plain `http://` the scanner falls back to taking a photo of the QR. Any of these works, and they can be used together:
+
+1. **Cloudflare Tunnel** (what is used now): the tunnel address is already `https://`. Set **Settings › General › App address** to that address so printed QR codes open it.
+2. **HTTPS in Docker** (on the local network, no internet or domain needed): an optional [Caddy](https://caddyserver.com) front in `docker-compose.yml`.
+   - Copy `.env.https.example` to `.env.https` and set `HTTPS_HOST` to the address phones use for this PC (its LAN IP, e.g. `192.168.1.20`, or its name).
+   - Start it with `docker compose --profile https up -d`. The app is then also at `https://<HTTPS_HOST>:3443` (and still at `http://…:3002`). Allow port 3443 in the Windows firewall.
+   - The certificate comes from Caddy's own local authority, so phones first show a "not secure / not private" warning. Either accept it once per phone (Chrome on Android: **Advanced › Proceed**), or install Caddy's root certificate on each phone so there is no warning:
+     - Copy it out: `docker cp manhour-https:/data/caddy/pki/authorities/local/root.crt caddy-root.crt`
+     - **Android**: Settings › Security › Encryption & credentials › Install a certificate › CA certificate › pick `caddy-root.crt`.
+     - **iPhone**: AirDrop / email the file, install the profile (Settings › Profile Downloaded), then Settings › General › About › **Certificate Trust Settings** › turn it on.
+   - The certificates live in the `caddy_data` Docker volume; keep it, or phones have to trust a new root certificate.
+   - To print QR labels for this address, set **App address** to `https://<HTTPS_HOST>:3443`.
+3. **Your own domain / reverse proxy** (IIS, nginx, a company proxy): forward to `http://<server>:3002` with the `Host`, `X-Forwarded-Host` and `X-Forwarded-Proto` headers, and set **App address** to the public `https://` address.
+
 ## Who can do what
 
 - **Admin** (tick box on the user) can do everything, including Settings, API keys, form fields and the **Permissions** page.
@@ -40,7 +56,9 @@ On start the container applies new database migrations (`prisma migrate deploy`)
 | Area | Permission | What it allows |
 |---|---|---|
 | Job cards | View job cards | Browse job cards, open a card, print QR labels |
-| | Add job cards | Add Job Card page (photo, PDF upload or typed) and the Excel import |
+| | Add job cards (photo / PDF, Excel) | Add Job Card page from a photo or PDF, and the Excel import |
+| | Add job cards by typing | The "Type it in" form on the Add Job Card page |
+| | Create workshop repair cards · Create onsite repair cards | Which types of card they may add (needed together with one of the two above) |
 | | Edit job card details | Correct the printed details, link another asset, deactivate / delete unused cards |
 | | Close & reopen job cards | Any card (supervisors without it: cards their team worked on) |
 | Time | Technician | Start / stop work by scanning job card QR codes (login linked to an employee) |
@@ -50,11 +68,21 @@ On start the container applies new database migrations (`prisma migrate deploy`)
 | | Edit records · Delete records | On the records they can see |
 | | View analytics · View costs & rates | Analytics; hourly rates, labour, parts and asset values |
 | Sessions | Review all work sessions | Instead of their team only |
-| Store | Store manager | Issue spare parts, manage the inventory |
+| Store | Store manager | Issue spare parts (also by scanning item QR codes), manage the inventory, handle part requests |
 | Assets | View assets & history · Manage assets | Assets pages; add / edit / import assets |
 | Administration | Manage employees & shifts · Manage users | Employees page and shifts; Users page (can't create or change admins) |
 
-The upgrade turned the old user types into groups automatically: **Manager**, **Store Manager**, **Technician** (every user linked to an employee) and **Own records entry**. Hour limits block everyone except admins. A logging way switched off in Settings stays available to admins only.
+The upgrade turned the old user types into groups automatically: **Manager**, **Store Manager**, **Technician** (every user linked to an employee) and **Own records entry**. Groups that could add job cards before the job card types were introduced also got typing and both types, so nothing changed for them. Hour limits block everyone except admins. A logging way switched off in Settings stays available to admins only.
+
+**Team leaders**: a job card is **received by** a team leader, meaning an employee whose login supervises a team (Employees › Supervisors). Without any permission, the leader (and his own supervisors) can:
+- open the card;
+- request spare parts for it;
+- **assign** it to members of his team;
+- manage his team's records and QR sessions, as every supervisor can.
+
+Assigned members can open the card too. Their cards are listed under **My Job Cards** and on **Home**.
+
+**Reports** (menu) need: "View costs & rates" for the job card and asset cost reports; "View all employees' records" or a team for the hours report; store manager or "View costs" for parts issued. The **Audit Log** is for admins.
 
 ## Rules
 
@@ -78,7 +106,7 @@ Each way can be switched off in **Settings › General › Ways of logging man-h
    - The user always reviews the rows next to the photo before saving. The photo stays linked to the saved records.
 4. **Job card QR**: every job card has a QR code (Job Cards › QR icon, or **QR labels (open cards)** for a printable A4 sheet of labels).
    - A technician scans it with the phone's normal camera. The link opens the job card, and they sign in with their own login (linked to their employee record) and tap **Start work** / **Stop work**. They can do this as often as needed, over several days, until the card is closed.
-   - Or from inside the portal: **Scan Job Card** in the menu. **Take a photo of the QR** works over plain http, and the photo is read in the browser and never uploaded. When the portal is opened over HTTPS, a **live camera** button appears too. The job card number can also be typed. The same page is used by store managers and supervisors.
+   - Or from inside the portal: **Scan QR** in the menu. Over HTTPS (see **HTTPS** above) the **camera opens straight away** and the page opens as soon as it recognises a job card, asset or inventory item QR code (no photo to take). Over plain http it falls back to **Take a photo of the QR**, read in the browser and never uploaded. The job card number can also be typed. The same page is used by store managers and supervisors.
    - One job at a time: starting on another card stops the one still running.
    - All of a technician's sessions on a card add up into their single man-hour record for it (source "QR scan"), so Records, Analytics, limits and exports include them. The hours and dates of such a record can't be typed over; correct the sessions instead.
    - If a technician's hours on a card were already entered another way (form, Excel, sheet), QR scanning on that card is blocked for them.
@@ -109,15 +137,47 @@ The bell at the top shows unread in-app notifications (refreshed every minute). 
 - **Shift reminder** and **work stopped at the hour limit**: to the technician.
 - **Session to review**: to the employee's supervisors (admins if none), once per flagged session.
 - **Low stock**: to store managers and admins when a part drops to or below its low-stock level (once each time it crosses the level).
+- **Job card received by you**: to the received-by team leader's login when a job card is added (or when an edit names them).
+- **Job card assigned to you**: to a team member when their leader assigns a card.
+- **Part request**: to store managers and admins when someone requests spare parts; **MR raised** (per line) / **fulfilled**: back to the requester.
+
+**On phones and computers (push)**: after login the app asks "Get your notifications on this device" → **Turn on**, and the browser asks for permission. Every notification then also pops up on that device, even when the app is closed.
+- **My account** has:
+  - turn it on / off per device;
+  - choose which kinds pop up (everything still appears under the bell);
+  - send a test.
+- **Requirements**:
+  - https (the Cloudflare tunnel or the Caddy front, see **HTTPS**) and internet on the server;
+  - on **iPhone / iPad**: first **Add to Home Screen**, open the app from there, then turn notifications on.
+- **Keys**: the push keys are created automatically and kept in the database. To keep them when moving to another database, set `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` (see `.env.example`).
+
+**Install as an app**:
+- Android (Chrome): ⋮ › **Install app**.
+- iPhone (Safari): Share › **Add to Home Screen**.
+- Computer: the install icon in Chrome / Edge's address bar.
+
+It opens full screen with the company icon. It still needs the server; nothing works offline.
 
 ## Job cards and assets
 
-- **Add Job Card** (permission "Add job cards"): photograph the printed job card from the workshop system, or **upload its PDF** (if the PDF has several pages, the first job card is read; PDFs need a Gemini or Anthropic provider). The AI providers from Settings › Photo reading read the **printed** header only and ignore handwriting: Rep.Order Number (= the job card number), Code (= asset code), description, plate, chassis, YoM, HM/KM readings, date in, job type, repair at, project, work done lines, operator, received by, created by. Everything is shown next to the photo to check before saving. **Type it in** is the same form without a photo. The photo stays linked to the card ("Original card").
+- **Add Job Card** (permission "Add job cards (photo / PDF, Excel)"): photograph the printed job card from the workshop system, or **upload its PDF** (if the PDF has several pages, the first job card is read; PDFs need a Gemini or Anthropic provider). The AI providers from Settings › Photo reading read the **printed** header only and ignore handwriting: Rep.Order Number (= the job card number), Code (= asset code), description, plate, chassis, YoM, HM/KM readings, date in, job type, repair at, project, work done lines, operator, received by, created by. Everything is shown next to the photo to check before saving. **Type it in** (permission "Add job cards by typing") is the same form without a photo; its **Scan asset QR** button fills in the asset (code, description, plate, chassis, year) from the asset's QR label. The photo stays linked to the card ("Original card").
+- **Repair type**: every new card is a **Workshop** or **Onsite** repair. It is suggested from the printed "Repair at": if it contains one of the **Settings › General › Workshop words** (default `GARAGE, WORKSHOP`) it is Workshop, otherwise Onsite; the user can change it. Users can only pick the types their permissions allow. Existing cards were set the same way; cards with no "Repair at" have no type until edited.
+- **Received by** is a **team leader** (an employee whose login supervises a team). The printed name is matched to a team leader (same name, or all the words of one leader's name). The user confirms or picks another leader with the search box, or leaves it empty. The leader gets a notification, can assign the card to his team members (**Assigned to** on the job card page), and can request spare parts for it.
+- **Document (attachment)**: a card added from a photo or PDF already has it (the reference photo). A card **typed in**, or added by Excel / API, is created in **Oracle** first, so it shows a yellow **Upload document** until its document is uploaded on the job card page.
+  - Users who can add or edit job cards can upload or replace it (PDF / JPG / PNG / WEBP, up to 15 MB).
+  - They also see a yellow notice at the top of the app with the number of cards waiting, and **Job Cards › Needs document** lists them.
+  - Cards added before this existed are not flagged.
+- **Closing a job card** is refused while something is still to do, and the reasons are listed:
+  - the document is not uploaded;
+  - a part request is not fulfilled;
+  - someone is still clocked in on it.
+  An **admin** may close it anyway.
 - Checks before saving (repeated on the server):
   - the **job card number must be new**;
   - the **asset** is found by code, then plate no., then chassis no. If none matches, **Create asset from this card** adds it (the rest of its details are completed on the Assets page), or another asset can be chosen;
   - an asset can have **only one open job card**. Only an admin can add a second one ("Add anyway"), and reopening a closed card follows the same rule.
-- The Excel import of job cards (Job Cards page) has the same columns; the asset must exist, and rows for an asset that already has an open card are rejected (except in an admin's import).
+- The Excel import of job cards (Job Cards page) has the same columns, plus **Repair Type** (Workshop / Onsite; guessed from Repair At when empty). The asset must exist, rows for an asset that already has an open card are rejected (except in an admin's import), and rows of a type the user may not create are rejected. Received By is matched to an employee by name.
+- **QR codes for assets**: each asset page has its QR code (**Print label**, **Download QR**), and the Assets list prints a label sheet for the listed assets (**Print QR labels**). The label holds `<App address>/a/<asset code>`; scanning it with any phone camera or **Scan QR** opens the asset page (needs "View assets").
 - **Assets** (permissions "View assets" / "Manage assets"): code, description, category, location / department, make, model, serial, chassis, plate, year, purchase date, purchase value and **depreciation rate** (straight line, % of the purchase value per year). Add them one by one, import them from Excel (a code that already exists updates that asset from the filled-in cells; blank cells keep their value), export the list.
 - The **asset page** shows its details, the **book value today**, the **total maintenance cost** (labour + parts of all its job cards), the cost **per month and per year**, and the **job card history** with dates, job type, HM/KM and cost of each card. Values and costs need "View costs & rates".
 
@@ -141,7 +201,44 @@ Other mail servers: `MAIL_PROVIDER="smtp"` with `SMTP_HOST`, `SMTP_PORT`, `SMTP_
 - **Inventory** (store managers and admins): parts with part no., name, unit, unit cost (KWD), quantity on hand and an optional low-stock level. Add parts one by one or import them from Excel, and export the stock list.
 - **Receive** adds stock and can update the unit cost to the latest purchase price. **Adjust** sets the counted quantity after a stock count and needs a reason. Every change is kept in the part's history.
 - **Issuing parts**: the store manager scans the job card QR code (or opens the job card page), searches the parts and enters the quantities. Parts are issued at their current unit cost, and stock can't go below zero. A mistaken line can be returned to stock with a reason. Closed cards take no new issues.
+- **Add items by QR code** (job card page, store managers): the camera opens; each item QR scanned shows the item with **quantity 1** (change it if needed) and **Add**, which issues it to the card. The camera then waits for the next item. Not enough stock: it says how much is left.
+- **Item QR codes**: each part's page has its QR code (**Print label**, **Download QR**); **Inventory › Print QR labels** prints a sheet for the listed parts. The label holds `<App address>/p/<part no.>`; scanning it from **Scan QR** opens the item.
 - Parts at or below their low-stock level are highlighted, and the home page shows how many there are.
+
+## Part requests
+
+- **Who**: on a job card page, its **received-by** team leader, his supervisors and admins can **Request parts** while the card is open. Each request has **one line per part** (description + quantity) and an optional note.
+- **Store side**: store managers get a notification, and **Part Requests** in the menu lists every open request (the count is shown next to it).
+- **Each line stays open until the store ticks it.** Requests are not approved or rejected.
+  - Parts **in stock**: the store manager issues them to the card (Spare parts, or **Add items by QR code**), then ticks the line **Done**.
+  - Parts **not in stock**: **MR** records the MR number on the line (the MR itself is done outside this system). When the parts arrive, they are received into Inventory, issued to the card, and the line is ticked **Done**.
+  - **Mark all done** ticks every line of a request at once; a line ticked by mistake can be reopened.
+- **Status**: the request is **Fulfilled** when all its lines are done.
+- **The requester is notified** when a line gets an MR and when the whole request is fulfilled.
+- Requests made before lines existed became one line each.
+
+## Team leader dashboard
+
+Users who supervise a team see **My team** on Home:
+- the open job cards received by them or their team leaders, with:
+  - who each one is assigned to;
+  - hours so far;
+  - document / part request flags;
+- who in the team is clocked in right now;
+- hours this week per team member.
+
+Team members see **Assigned to me** on Home, which opens the card's scan page to start work.
+
+## Reports and audit log
+
+- **Reports** (menu): choose From / To and download Excel:
+  - **Job card costs**: per card; hours, labour, parts and total of the work in the period, plus asset, type, dates and status.
+  - **Asset costs**: per asset; cards, hours, labour, parts and total in the period, plus purchase value and book value today.
+  - **Team / employee hours**: per employee and job card, with a total per employee. Supervisors without "View all employees' records" get their own team.
+  - **Parts issued**: every issue and return in the period, with card, item, quantity, cost and who.
+
+  Hours count records by their start date. Parts count by the date they were issued.
+- **Audit Log** (admins): everything the app records (who, when, what), filterable by date, user, action, record type and free text in the details.
 
 ## Costs
 

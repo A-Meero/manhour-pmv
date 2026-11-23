@@ -18,6 +18,7 @@ type GeneralValues = {
   appBaseUrl: string;
   shiftAlerts: boolean;
   shiftGraceMinutes: string;
+  workshopWords: string;
 };
 
 type MailInfo = { label: string; from: string; ready: boolean; missing: string[] };
@@ -160,7 +161,14 @@ function GeneralSettings({ initial, mail }: { initial: GeneralValues; mail: Mail
         <div>
           <label className="label">App address for QR codes</label>
           <input className="input" placeholder="e.g. http://192.168.1.20:3002" value={values.appBaseUrl} onChange={(e) => setValues({ ...values, appBaseUrl: e.target.value })} />
-          <p className="mt-1 text-xs text-gray-500">The address phones use to open the app. Leave empty to use the address you are using now.</p>
+          <p className="mt-1 text-xs text-gray-500">The address phones use to open the app, used in the job card, asset and item QR codes (e.g. your Cloudflare Tunnel https address). Leave empty to use the address you are using now.</p>
+        </div>
+        <div className="sm:col-span-2">
+          <label className="label">Workshop words</label>
+          <input className="input" placeholder="GARAGE, WORKSHOP" value={values.workshopWords} onChange={(e) => setValues({ ...values, workshopWords: e.target.value })} />
+          <p className="mt-1 text-xs text-gray-500">
+            Separated by commas. A new job card whose printed &quot;Repair at&quot; contains one of these is suggested as a <b>workshop</b> repair; any other &quot;Repair at&quot; as <b>onsite</b>. The user can change it before saving.
+          </p>
         </div>
       </div>
       <div className="space-y-3 border-t border-gray-100 pt-4">

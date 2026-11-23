@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { getSettings } from "@/lib/settings";
 
 /**
- * Job card QR codes hold a plain link to /jc/<code>, so any phone camera can open it.
+ * QR codes hold plain links (/jc/<job card>, /a/<asset>, /p/<part no.>), so any phone camera can open them.
  * The address comes from Settings › General › App address; otherwise from the address the admin is using now.
  */
 export async function appOrigin(request?: Request) {
@@ -20,6 +20,14 @@ export async function appOrigin(request?: Request) {
 
 export function jobCardLink(origin: string, code: string) {
   return `${origin}/jc/${encodeURIComponent(code)}`;
+}
+
+export function assetLink(origin: string, code: string) {
+  return `${origin}/a/${encodeURIComponent(code)}`;
+}
+
+export function partLink(origin: string, partNo: string) {
+  return `${origin}/p/${encodeURIComponent(partNo)}`;
 }
 
 export function qrPng(text: string, width = 600) {

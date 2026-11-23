@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { canAddJobCards } from "@/lib/auth/access";
+import { allowedRepairTypes, canAddByPhoto } from "@/lib/auth/access";
 import { HttpError, withUser } from "@/lib/http";
 import { importJobCards } from "@/lib/job-card-entry";
 import { parseWorkbook } from "@/lib/excel";
@@ -14,7 +14,7 @@ export const POST = withUser(async (request, user) => {
   if (rows.length === 0) throw new HttpError(400, "The file has no data rows.");
   const summary = await importJobCards(
     rows.map((row) => ({ ...row.values, row: row.row, code: row.values.code, fields: row.fields })),
-    { source: "EXCEL", actorId: user.id, fileName, isAdmin: user.isAdmin },
+    { source: "EXCEL", actorId: user.id, fileName, isAdmin: user.isAdmin, allowedTypes: allowedRepairTypes(user) },
   );
   return NextResponse.json(summary);
-}, canAddJobCards);
+}, canAddByPhoto);

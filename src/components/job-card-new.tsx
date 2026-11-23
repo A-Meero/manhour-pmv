@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { Camera, FileText, Keyboard, RotateCcw, Upload } from "lucide-react";
 import { api, errorMessage } from "@/lib/client";
 import { Alert } from "@/components/ui";
-import { JobCardForm, type JobCardValues } from "@/components/job-card-form";
+import { JobCardForm, type JobCardFormOptions, type JobCardValues } from "@/components/job-card-form";
 import type { ClientField } from "@/components/custom-field-inputs";
 
-type Draft = Omit<JobCardValues, "assetId" | "dateOut" | "customFields">;
+type Draft = Omit<JobCardValues, "assetId" | "dateOut" | "customFields" | "receivedById" | "repairType">;
 type ReadResult = { photoPath: string; mimeType: string; draft: Draft; engine: string; warning: string; error: string };
 
 const blank = (): JobCardValues => ({
@@ -27,14 +27,28 @@ const blank = (): JobCardValues => ({
   project: "",
   operatorName: "",
   receivedBy: "",
+  receivedById: "",
+  repairType: "",
   createdByName: "",
   tasks: [],
   customFields: {},
 });
 
-/** Add Job Card: photograph the printed card (main way) or type it in, then review and save. */
-export function JobCardNew({ fields, isAdmin }: { fields: ClientField[]; isAdmin: boolean }) {
-  const [tab, setTab] = useState<"photo" | "type">("photo");
+/** Add Job Card: photograph the printed card / upload its PDF, or type it in (each needs its permission), then review and save. */
+export function JobCardNew({
+  fields,
+  isAdmin,
+  options,
+  canPhoto,
+  canType,
+}: {
+  fields: ClientField[];
+  isAdmin: boolean;
+  options: JobCardFormOptions;
+  canPhoto: boolean;
+  canType: boolean;
+}) {
+  const [tab, setTab] = useState<"photo" | "type">(canPhoto ? "photo" : "type");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<ReadResult | null>(null);
@@ -79,10 +93,10 @@ export function JobCardNew({ fields, isAdmin }: { fields: ClientField[]; isAdmin
       <div className="flex gap-1 border-b border-gray-200">
         {(
           [
-            ["photo", "Photo or PDF", Camera],
-            ["type", "Type it in", Keyboard],
+            ["photo", "Photo or PDF", Camera, canPhoto],
+            ["type", "Type it in", Keyboard, canType],
           ] as const
-        ).map(([id, label, Icon]) => (
+        ).filter(([, , , shown]) => shown).map(([id, label, Icon]) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -93,9 +107,9 @@ export function JobCardNew({ fields, isAdmin }: { fields: ClientField[]; isAdmin
         ))}
       </div>
 
-      {tab === "type" && <JobCardForm key="typed" mode="new" initial={blank()} fields={fields} isAdmin={isAdmin} />}
+      {tab === "type" && canType && <JobCardForm key="typed" mode="new" initial={blank()} fields={fields} isAdmin={isAdmin} options={options} />}
 
-      {tab === "photo" && !result && (
+      {tab === "photo" && canPhoto && !result && (
         <div className="card mx-auto max-w-md space-y-3 p-5 text-center">
           <button className="btn btn-primary w-full py-5 text-lg" disabled={busy} onClick={() => cameraInput.current?.click()}>
             <Camera className="h-6 w-6" /> {busy ? "Reading the card…" : "Photograph the job card"}
@@ -114,7 +128,7 @@ export function JobCardNew({ fields, isAdmin }: { fields: ClientField[]; isAdmin
         </div>
       )}
 
-      {tab === "photo" && result && (
+      {tab === "photo" && canPhoto && result && (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <div className="space-y-2 xl:sticky xl:top-4 xl:self-start">
             {preview &&
@@ -145,6 +159,7 @@ export function JobCardNew({ fields, isAdmin }: { fields: ClientField[]; isAdmin
               initial={{ ...blank(), ...result.draft }}
               fields={fields}
               isAdmin={isAdmin}
+              options={options}
               photoPath={result.photoPath}
             />
           </div>

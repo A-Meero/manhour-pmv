@@ -4,7 +4,8 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Man Hour System",
   description: "Ahmadiah man-hour tracking",
-  icons: { icon: "/ahmadiah-a.png" },
+  icons: { icon: "/ahmadiah-a.png", apple: "/icon-192.png" },
+  appleWebApp: { capable: true, title: "Man Hours", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {

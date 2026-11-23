@@ -15,6 +15,25 @@ enum DataSource {
   QR
 }
 
+enum RepairType {
+  WORKSHOP
+  ONSITE
+}
+
+enum PartRequestLineStatus {
+  OPEN
+  /// Being bought outside the system (material request)
+  MR_RAISED
+  DONE
+}
+
+enum PartRequestStatus {
+  OPEN
+  /// The items are being bought outside the system (material request)
+  MR_RAISED
+  FULFILLED
+}
+
 enum JobCardStatus {
   OPEN
   CLOSED
@@ -56,34 +75,41 @@ enum ScanStatus {
 }
 
 model User {
-  id                 String    @id @default(cuid())
-  name               String
-  email              String    @unique
-  passwordHash       String
+  id             String    @id @default(cuid())
+  name           String
+  email          String    @unique
+  passwordHash   String
   /// Admins can do everything; everyone else gets what their permission groups allow
-  isAdmin            Boolean   @default(false)
-  active             Boolean   @default(true)
+  isAdmin        Boolean   @default(false)
+  active         Boolean   @default(true)
   /// Employee record this login belongs to (technicians, own-records entry)
-  employeeId         String?   @unique
-  employee           Employee? @relation("UserEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
-  sessionVersion     Int       @default(0)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  employeeId     String?   @unique
+  employee       Employee? @relation("UserEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+  sessionVersion Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  supervising    EmployeeSupervisor[]
-  recordsCreated ManHourRecord[]      @relation("RecordCreatedBy")
-  recordsUpdated ManHourRecord[]      @relation("RecordUpdatedBy")
-  scans          ScanSheet[]
-  importBatches  ImportBatch[]
-  auditLogs      AuditLog[]
-  apiKeysCreated ApiKey[]
-  jobCardsClosed JobCard[]            @relation("JobCardClosedBy")
-  workSessions   WorkSession[]        @relation("SessionUser")
-  sessionsEdited WorkSession[]        @relation("SessionEditedBy")
-  stockMovements StockMovement[]
-  groups         UserGroup[]
-  notifications  Notification[]
-  jobCardsAdded  JobCard[]            @relation("JobCardAddedBy")
+  supervising           EmployeeSupervisor[]
+  recordsCreated        ManHourRecord[]      @relation("RecordCreatedBy")
+  recordsUpdated        ManHourRecord[]      @relation("RecordUpdatedBy")
+  scans                 ScanSheet[]
+  importBatches         ImportBatch[]
+  auditLogs             AuditLog[]
+  apiKeysCreated        ApiKey[]
+  jobCardsClosed        JobCard[]            @relation("JobCardClosedBy")
+  workSessions          WorkSession[]        @relation("SessionUser")
+  sessionsEdited        WorkSession[]        @relation("SessionEditedBy")
+  stockMovements        StockMovement[]
+  groups                UserGroup[]
+  notifications         Notification[]
+  jobCardsAdded         JobCard[]            @relation("JobCardAddedBy")
+  partRequests          PartRequest[]        @relation("PartRequestBy")
+  partRequestsFulfilled PartRequest[]        @relation("PartRequestFulfilledBy")
+  partRequestLinesDone  PartRequestLine[]    @relation("PartRequestLineDoneBy")
+  assignmentsMade       JobCardAssignment[]  @relation("JobCardAssignedBy")
+  pushSubscriptions     PushSubscription[]
+  /// Notification kinds this user doesn't want as push notifications (still shown in the app)
+  mutedPushKinds        String[]             @default([])
 }
 
 /// A named set of permissions (see src/lib/permissions.ts). Users get the union of their groups' permissions.
@@ -187,11 +213,13 @@ model Employee {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  user         User?                @relation("UserEmployee")
-  shift        Shift?               @relation(fields: [shiftId], references: [id], onDelete: SetNull)
-  supervisors  EmployeeSupervisor[]
-  records      ManHourRecord[]
-  workSessions WorkSession[]
+  user             User?                @relation("UserEmployee")
+  shift            Shift?               @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  supervisors      EmployeeSupervisor[]
+  records          ManHourRecord[]
+  workSessions     WorkSession[]
+  jobCardsReceived JobCard[]            @relation("JobCardReceivedBy")
+  assignments      JobCardAssignment[]
 
   @@index([name])
   @@index([shiftId])
@@ -226,43 +254,131 @@ model EmployeeSupervisor {
 }
 
 model JobCard {
-  id           String        @id @default(cuid())
-  code         String        @unique
-  active       Boolean       @default(true)
+  id               String        @id @default(cuid())
+  code             String        @unique
+  active           Boolean       @default(true)
   /// Closed cards take no more QR sessions, part issues or (non-admin) records
-  status       JobCardStatus @default(OPEN)
-  closedAt     DateTime?
-  closedById   String?
-  customFields Json          @default("{}")
-  source       DataSource    @default(MANUAL)
+  status           JobCardStatus @default(OPEN)
+  closedAt         DateTime?
+  closedById       String?
+  customFields     Json          @default("{}")
+  source           DataSource    @default(MANUAL)
   /// Printed header of the original job card (code above = "Rep.Order Number")
-  assetId         String?
-  dateIn          DateTime?  @db.Date
-  dateOut         DateTime?  @db.Date
-  previousReading Decimal?   @db.Decimal(12, 1)
-  currentReading  Decimal?   @db.Decimal(12, 1)
-  jobType         String     @default("")
-  repairAt        String     @default("")
-  project         String     @default("")
-  operatorName    String     @default("")
-  receivedBy      String     @default("")
-  createdByName   String     @default("")
+  assetId          String?
+  dateIn           DateTime?     @db.Date
+  dateOut          DateTime?     @db.Date
+  previousReading  Decimal?      @db.Decimal(12, 1)
+  currentReading   Decimal?      @db.Decimal(12, 1)
+  jobType          String        @default("")
+  repairAt         String        @default("")
+  project          String        @default("")
+  operatorName     String        @default("")
+  receivedBy       String        @default("")
+  /// The employee the printed "Received by" was matched to
+  receivedById     String?
+  /// Added without the original document (typed, Excel, API): it must be uploaded (created in Oracle first)
+  documentRequired Boolean       @default(false)
+  /// Workshop or onsite repair (null on older cards with no "Repair at")
+  repairType       RepairType?
+  createdByName    String        @default("")
   /// Photo of the original card, relative to the uploads folder
-  photoPath       String     @default("")
-  addedById       String?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  photoPath        String        @default("")
+  addedById        String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
-  asset          Asset?          @relation(fields: [assetId], references: [id], onDelete: Restrict)
-  addedBy        User?           @relation("JobCardAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
-  closedBy       User?           @relation("JobCardClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
-  tasks          JobCardTask[]
-  records        ManHourRecord[]
-  workSessions   WorkSession[]
-  stockMovements StockMovement[]
+  asset              Asset?              @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  addedBy            User?               @relation("JobCardAddedBy", fields: [addedById], references: [id], onDelete: SetNull)
+  closedBy           User?               @relation("JobCardClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  receivedByEmployee Employee?           @relation("JobCardReceivedBy", fields: [receivedById], references: [id], onDelete: SetNull)
+  partRequests       PartRequest[]
+  assignments        JobCardAssignment[]
+  tasks              JobCardTask[]
+  records            ManHourRecord[]
+  workSessions       WorkSession[]
+  stockMovements     StockMovement[]
 
   @@index([status])
   @@index([assetId, status])
+  @@index([receivedById])
+}
+
+/// A job card assigned by its received-by team leader to one of his team members (a to-do; scanning is not limited).
+model JobCardAssignment {
+  id           String   @id @default(cuid())
+  jobCardId    String
+  employeeId   String
+  assignedById String?
+  createdAt    DateTime @default(now())
+
+  jobCard    JobCard  @relation(fields: [jobCardId], references: [id], onDelete: Cascade)
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  assignedBy User?    @relation("JobCardAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@unique([jobCardId, employeeId])
+  @@index([employeeId])
+}
+
+/// A request for spare parts on a job card (lines below), open until all its lines are done.
+model PartRequest {
+  id            String            @id @default(cuid())
+  jobCardId     String
+  requestedById String?
+  /// Optional note (the items are the lines)
+  text          String            @default("")
+  status        PartRequestStatus @default(OPEN)
+  mrNumber      String            @default("")
+  storeNote     String            @default("")
+  mrRaisedAt    DateTime?
+  fulfilledById String?
+  fulfilledAt   DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  jobCard     JobCard           @relation(fields: [jobCardId], references: [id], onDelete: Cascade)
+  requestedBy User?             @relation("PartRequestBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  fulfilledBy User?             @relation("PartRequestFulfilledBy", fields: [fulfilledById], references: [id], onDelete: SetNull)
+  lines       PartRequestLine[]
+
+  @@index([status])
+  @@index([jobCardId])
+}
+
+/// One item asked for in a part request: free text + quantity. The store ticks it done or records an MR for it.
+model PartRequestLine {
+  id          String                @id @default(cuid())
+  requestId   String
+  line        Int
+  description String
+  qty         Decimal?              @db.Decimal(12, 3)
+  status      PartRequestLineStatus @default(OPEN)
+  mrNumber    String                @default("")
+  mrRaisedAt  DateTime?
+  doneById    String?
+  doneAt      DateTime?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  request PartRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  doneBy  User?       @relation("PartRequestLineDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
+
+  @@index([requestId])
+}
+
+/// A browser / phone that receives push notifications for a user.
+model PushSubscription {
+  id         String    @id @default(cuid())
+  userId     String
+  endpoint   String    @unique
+  p256dh     String
+  auth       String
+  userAgent  String    @default("")
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model ManHourRecord {
@@ -309,16 +425,16 @@ model ManHourRecord {
 
 /// One start→stop period of a technician working on a job card (QR scans). Summed into one ManHourRecord.
 model WorkSession {
-  id           String    @id @default(cuid())
-  employeeId   String
-  jobCardId    String
+  id               String    @id @default(cuid())
+  employeeId       String
+  jobCardId        String
   /// Login that scanned
-  userId       String?
-  startedAt    DateTime
+  userId           String?
+  startedAt        DateTime
   /// null while the technician is still working
-  endedAt      DateTime?
+  endedAt          DateTime?
   /// Stopped by the system after the maximum session length
-  autoStopped  Boolean   @default(false)
+  autoStopped      Boolean   @default(false)
   /// Still running after the shift ended: when the technician was reminded (timer keeps going)
   shiftReminderAt  DateTime?
   /// Shift end of that reminder (for "I finished at shift end")
@@ -327,11 +443,11 @@ model WorkSession {
   limitStoppedAt   DateTime?
   /// Technician's answer to the after-shift question: CONTINUE | SHIFT_END | KEEP
   afterShiftAnswer String?
-  needsReview  Boolean   @default(false)
-  reviewNote   String    @default("")
-  editedById   String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  needsReview      Boolean   @default(false)
+  reviewNote       String    @default("")
+  editedById       String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   jobCard  JobCard  @relation(fields: [jobCardId], references: [id], onDelete: Restrict)

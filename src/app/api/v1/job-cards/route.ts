@@ -9,7 +9,8 @@ const MAX_ITEMS = 5000;
  * Body: ["JC-1001", "JC-1002"]  or  { "jobCards": [{ "id": "JC-1001", "assetCode": "SUV172", "dateIn": "2026-11-21", "jobType": "Break Down",
  *   "project": "…", "workDone": "line 1; line 2", "fields": { "<custom field key>": "…" } }] }
  * Header fields (all optional): assetCode / plateNo / chassisNo, dateIn, dateOut, previousReading, currentReading, jobType,
- * repairAt, project, operatorName, receivedBy, createdByName, workDone. The asset must exist and must not have an open job card.
+ * repairAt, repairType (Workshop / Onsite; guessed from repairAt when left out), project, operatorName, receivedBy (matched to an
+ * employee by name, who is notified), createdByName, workDone. The asset must exist and must not have an open job card.
  * Existing IDs are skipped. Response: { created, skipped, failed, issues[] }.
  */
 export async function POST(request: Request) {

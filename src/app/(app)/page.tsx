@@ -19,6 +19,7 @@ import { formatTime } from "@/lib/dates";
 import { getSettings } from "@/lib/settings";
 import { addDays, todayUtc, weekStart } from "@/lib/dates";
 import { PageHeader } from "@/components/ui";
+import { AssignedToMe, TeamDashboard } from "@/components/team-dashboard";
 
 const fmt = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
@@ -59,7 +60,7 @@ export default async function HomePage() {
 
   const actions = [
     ...(scans ? [{ href: "/my-work", label: "My work", icon: Timer }] : []),
-    ...(canUseScanPage(user, settings.methods) ? [{ href: "/scan", label: "Scan job card", icon: ScanLine }] : []),
+    ...(canUseScanPage(user, settings.methods) ? [{ href: "/scan", label: "Scan QR", icon: ScanLine }] : []),
     ...(canEnterRecords(user) && allowed("manual") ? [{ href: "/records/new", label: "New entry", icon: Plus }] : []),
     ...(canEnterRecords(user) && allowed("photo") ? [{ href: "/records/scan", label: "Scan a sheet", icon: Camera }] : []),
     ...(canEnterRecords(user) && allowed("excel") ? [{ href: "/records/import", label: "Import Excel", icon: FileSpreadsheet }] : []),
@@ -101,6 +102,9 @@ export default async function HomePage() {
           {lowStock} spare part(s) are at or below their low stock level →
         </Link>
       )}
+      <AssignedToMe user={user} />
+      <TeamDashboard user={user} weekStartDay={settings.weekStartDay} />
+
       {pendingScans > 0 && (
         <Link href="/records/scan" className="mb-5 block rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           You have {pendingScans} scanned sheet(s) waiting for review →

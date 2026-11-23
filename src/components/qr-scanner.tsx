@@ -1,201 +1,54 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import jsQR from "jsqr";
-import { Camera, Keyboard, Video, VideoOff } from "lucide-react";
-import { Alert } from "@/components/ui";
+import { Keyboard } from "lucide-react";
+import { LiveQrScanner } from "@/components/live-qr-scanner";
+import { parseQr, qrHref, QR_KIND_LABEL, type QrKind } from "@/lib/qr-codes";
 
-/** Finds the job card ID in a scanned QR: a /jc/<ID> link (any host, so old labels still work) or a bare ID. */
+/** Finds the job card number in a scanned QR: a /jc/<no> link (any host) or a bare number. */
 export function jobCardFromQr(text: string): string | null {
-  const value = text.trim();
-  const link = value.match(/\/jc\/([^?#\s]+)/);
-  if (link) {
-    try {
-      return decodeURIComponent(link[1]).trim() || null;
-    } catch {
-      return null;
-    }
-  }
-  if (/^https?:\/\//i.test(value)) return null;
-  return /^[A-Za-z0-9][A-Za-z0-9 ._\-/]{0,99}$/.test(value) ? value : null;
+  const target = parseQr(text, "jobcard");
+  return target?.kind === "jobcard" ? target.code : null;
 }
 
-const noSubscribe = () => () => {};
-
-/** Tries a few sizes: phone photos are large, and QR codes decode best at around 1000px. */
-function decodeImage(image: CanvasImageSource & { width: number; height: number }) {
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) return null;
-  const longest = Math.max(image.width, image.height);
-  for (const target of [1000, 1600, 700, longest]) {
-    const scale = Math.min(1, target / longest);
-    canvas.width = Math.max(1, Math.round(image.width * scale));
-    canvas.height = Math.max(1, Math.round(image.height * scale));
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-    const found = jsQR(pixels.data, pixels.width, pixels.height, { inversionAttempts: "attemptBoth" });
-    if (found?.data) return found.data;
-  }
-  return null;
-}
-
-async function loadImage(file: File) {
-  if ("createImageBitmap" in window) {
-    try {
-      return await createImageBitmap(file, { imageOrientation: "from-image" });
-    } catch {
-      // fall back to <img> below
-    }
-  }
-  const url = URL.createObjectURL(file);
-  try {
-    const image = new Image();
-    image.src = url;
-    await image.decode();
-    return image;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-export function QrScanner() {
+/**
+ * The Scan page: the camera opens straight away and the first known QR code opens its page —
+ * a job card (start / stop work, issue parts, close), an asset, or an inventory item.
+ */
+export function QrScanner({ kinds }: { kinds: QrKind[] }) {
   const router = useRouter();
-  const fileInput = useRef<HTMLInputElement>(null);
-  const video = useRef<HTMLVideoElement>(null);
-  const stream = useRef<MediaStream | null>(null);
-  // Phone browsers only allow the live camera on HTTPS (or localhost). False while rendering on the server.
-  const liveAvailable = useSyncExternalStore(
-    noSubscribe,
-    () => window.isSecureContext && !!navigator.mediaDevices?.getUserMedia,
-    () => false,
-  );
-  const [live, setLive] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const [manual, setManual] = useState("");
+  const [opening, setOpening] = useState("");
 
-  // Release the camera when leaving the page.
-  useEffect(() => () => stream.current?.getTracks().forEach((track) => track.stop()), []);
-
-  function open(code: string) {
-    stopLive();
-    router.push(`/jc/${encodeURIComponent(code)}`);
+  function onDetect(text: string) {
+    const target = parseQr(text, "jobcard");
+    if (!target || !kinds.includes(target.kind)) return false;
+    setOpening(`Opening ${QR_KIND_LABEL[target.kind]} ${target.code}…`);
+    router.push(qrHref(target));
+    return true;
   }
 
-  function handle(text: string | null) {
-    if (!text) {
-      setError("No QR code found in the photo. Hold the phone closer so the code fills most of the picture, and keep it sharp.");
-      return;
-    }
-    const code = jobCardFromQr(text);
-    if (!code) {
-      setError("This QR code is not a job card QR.");
-      return;
-    }
-    open(code);
-  }
-
-  async function onPhoto(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    setBusy(true);
-    setError("");
-    try {
-      const image = await loadImage(file);
-      handle(decodeImage(image));
-    } catch {
-      setError("The photo could not be read. Try again.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function stopLive() {
-    stream.current?.getTracks().forEach((track) => track.stop());
-    stream.current = null;
-    setLive(false);
-  }
-
-  async function startLive() {
-    setError("");
-    try {
-      const media = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-      stream.current = media;
-      setLive(true);
-      requestAnimationFrame(() => {
-        if (!video.current) return;
-        video.current.srcObject = media;
-        void video.current.play();
-        scanFrames();
-      });
-    } catch {
-      setError("The camera could not be opened. Allow camera access, or take a photo instead.");
-    }
-  }
-
-  function scanFrames() {
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    const step = () => {
-      const element = video.current;
-      if (!stream.current || !element || !context) return;
-      if (element.readyState >= 2 && element.videoWidth) {
-        const scale = Math.min(1, 800 / Math.max(element.videoWidth, element.videoHeight));
-        canvas.width = Math.round(element.videoWidth * scale);
-        canvas.height = Math.round(element.videoHeight * scale);
-        context.drawImage(element, 0, 0, canvas.width, canvas.height);
-        const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-        const found = jsQR(pixels.data, pixels.width, pixels.height, { inversionAttempts: "dontInvert" });
-        const code = found?.data ? jobCardFromQr(found.data) : null;
-        if (code) {
-          open(code);
-          return;
-        }
-      }
-      setTimeout(step, 200);
-    };
-    step();
-  }
+  const names = kinds.map((kind) => QR_KIND_LABEL[kind]);
+  const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names.at(-1)}` : names[0];
 
   return (
     <div className="mx-auto max-w-md space-y-4">
-      {live ? (
-        <div className="card space-y-3 p-3">
-          <div className="relative overflow-hidden rounded-lg bg-black">
-            <video ref={video} className="aspect-square w-full object-cover" playsInline muted />
-            <div className="pointer-events-none absolute inset-[18%] rounded-lg border-4 border-white/80" />
-          </div>
-          <p className="text-center text-sm text-gray-600">Point the camera at the job card QR code.</p>
-          <button className="btn w-full" onClick={stopLive}>
-            <VideoOff className="h-4 w-4" /> Stop camera
-          </button>
-        </div>
-      ) : (
-        <div className="card space-y-3 p-5 text-center">
-          <button className="btn btn-primary w-full py-5 text-lg" disabled={busy} onClick={() => fileInput.current?.click()}>
-            <Camera className="h-6 w-6" /> {busy ? "Reading…" : "Take a photo of the QR"}
-          </button>
-          <input ref={fileInput} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPhoto} />
-          {liveAvailable && (
-            <button className="btn w-full" onClick={startLive}>
-              <Video className="h-4 w-4" /> Use live camera
-            </button>
-          )}
-          <p className="text-xs text-gray-500">The photo stays on your phone; only the job card number is used.</p>
-        </div>
-      )}
-
-      {error && <Alert kind="warning">{error}</Alert>}
+      <div className="card p-3">
+        <LiveQrScanner
+          onDetect={onDetect}
+          paused={!!opening}
+          hint={opening || `Point the camera at a ${list} QR code. It opens as soon as it is recognised.`}
+          unknownMessage={`This is not a ${list} QR code.`}
+        />
+      </div>
 
       <form
         className="card space-y-2 p-4"
         onSubmit={(event) => {
           event.preventDefault();
           const code = manual.trim();
-          if (code) open(code);
+          if (code) router.push(`/jc/${encodeURIComponent(code)}`);
         }}
       >
         <label className="label flex items-center gap-2" htmlFor="manual-code">

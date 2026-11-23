@@ -1,0 +1,18 @@
+# Optional HTTPS front for the app (docker compose --profile https up -d).
+# Phones only allow the live QR camera on https. Caddy serves https://<HTTPS_HOST>:3443 with a certificate from its own
+# local certificate authority and forwards everything to the app container.
+# HTTPS_HOST = the address phones use for this PC (its LAN IP such as 192.168.1.20, or its name), set in .env.https.
+
+{
+	# Certificates come from Caddy's own authority: no internet or domain needed
+	local_certs
+	skip_install_trust
+	# Phones opening https://192.168.x.x send no server name; use this one
+	default_sni {$HTTPS_HOST:localhost}
+}
+
+https://{$HTTPS_HOST:localhost}:3443 {
+	tls internal
+	encode gzip
+	reverse_proxy app:3002
+}

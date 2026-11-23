@@ -7,6 +7,11 @@ import { useState } from "react";
 import {
   ChartColumn,
   Camera,
+  ClipboardList,
+  FileCheck2,
+  FileWarning,
+  FileSpreadsheet,
+  ScrollText,
   Clock,
   CreditCard,
   FilePlus2,
@@ -31,6 +36,7 @@ import {
 import type { NavItem } from "@/lib/nav";
 import { api } from "@/lib/client";
 import { NotificationBell } from "@/components/notification-bell";
+import { PushPrompt } from "@/components/push-prompt";
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   home: House,
@@ -51,6 +57,10 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   cardplus: FilePlus2,
   truck: Truck,
   shield: ShieldCheck,
+  clipboard: ClipboardList,
+  mycards: FileCheck2,
+  report: FileSpreadsheet,
+  audit: ScrollText,
 };
 
 function isActive(pathname: string, href: string) {
@@ -63,10 +73,13 @@ function isActive(pathname: string, href: string) {
 export function AppShell({
   nav,
   user,
+  needDocument = 0,
   children,
 }: {
   nav: NavItem[];
   user: { name: string; role: string; supervisor: boolean };
+  /** Job cards still waiting for their document (shown to users who can upload it) */
+  needDocument?: number;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -98,6 +111,7 @@ export function AppShell({
             >
               <Icon className="h-4 w-4 shrink-0" />
               {item.label}
+              {!!item.badge && <span className="ml-auto rounded-full bg-amber-500 px-1.5 text-xs font-semibold text-white">{item.badge}</span>}
             </Link>
           );
         })}
@@ -150,7 +164,19 @@ export function AppShell({
         <div className="hidden justify-end px-8 pt-3 lg:flex">
           <NotificationBell />
         </div>
-        <main className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:pb-8 lg:pt-0">{children}</main>
+        <main className="mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8 lg:pb-8 lg:pt-0">
+          <PushPrompt />
+          {needDocument > 0 && pathname !== "/job-cards" && (
+            <Link
+              href="/job-cards?status=nodoc"
+              className="mb-4 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-100 px-4 py-2.5 text-sm font-medium text-amber-950 hover:bg-amber-200"
+            >
+              <FileWarning className="h-4 w-4 shrink-0" />
+              {needDocument === 1 ? "1 job card needs its document" : `${needDocument} job cards need their document`} (created in Oracle). Upload it →
+            </Link>
+          )}
+          {children}
+        </main>
       </div>
     </div>
   );

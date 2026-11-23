@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Download, PackagePlus, Pencil, Plus, Scale, Upload } from "lucide-react";
+import { Download, PackagePlus, Pencil, Plus, Printer, Scale, Upload } from "lucide-react";
 import { api, errorMessage } from "@/lib/client";
 import { Alert, Modal, StatusBadge } from "@/components/ui";
 import { ImportPanel } from "@/components/import-panel";
@@ -41,6 +41,15 @@ export function InventoryManager({ parts, filters, totalValue }: { parts: PartRo
           <button className="btn">Search</button>
         </form>
         <div className="flex flex-wrap gap-2">
+          <a
+            className="btn"
+            href={`/api/templates/part-labels${filters.q || filters.show !== "active" ? `?ids=${parts.map((part) => part.id).join(",")}` : ""}`}
+            target="_blank"
+            rel="noreferrer"
+            title="QR labels for the listed parts"
+          >
+            <Printer className="h-4 w-4" /> Print QR labels
+          </a>
           <a className="btn" href="/api/parts/export" download>
             <Download className="h-4 w-4" /> Export
           </a>

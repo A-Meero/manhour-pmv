@@ -6,10 +6,17 @@ import { qrPng } from "@/lib/qr";
 const RED = rgb(0.89, 0.15, 0.17);
 const GREY = rgb(0.45, 0.45, 0.45);
 
-/** A4 sheets of job card QR labels, 3 × 4 per page, with cut lines. */
-export async function buildQrLabelsPdf(cards: { code: string; link: string }[], logoPng?: Uint8Array): Promise<Uint8Array> {
+/**
+ * A4 sheets of QR labels (job cards, assets, inventory items), 3 × 4 per page, with cut lines.
+ * Each label shows its code and a small line under it (default: the job card hint).
+ */
+export async function buildQrLabelsPdf(
+  cards: { code: string; link: string; hint?: string }[],
+  logoPng?: Uint8Array,
+  options: { title?: string; empty?: string } = {},
+): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
-  pdf.setTitle("Job card QR labels");
+  pdf.setTitle(options.title ?? "Job card QR labels");
   pdf.setCreator("Man Hour System");
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
@@ -45,13 +52,14 @@ export async function buildQrLabelsPdf(cards: { code: string; link: string }[], 
     while (size > 8 && bold.widthOfTextAtSize(card.code, size) > cellW - 16) size -= 1;
     const codeW = bold.widthOfTextAtSize(card.code, size);
     page.drawText(card.code, { x: x + (cellW - codeW) / 2, y: y + 26, size, font: bold, color: RED });
-    const hint = "Scan to start / stop work";
+    let hint = card.hint ?? "Scan to start / stop work";
+    while (hint.length > 3 && regular.widthOfTextAtSize(hint, 8) > cellW - 12) hint = `${hint.slice(0, -2).trimEnd()}…`;
     const hintW = regular.widthOfTextAtSize(hint, 8);
     page.drawText(hint, { x: x + (cellW - hintW) / 2, y: y + 12, size: 8, font: regular, color: GREY });
   }
   if (cards.length === 0) {
     const page = pdf.addPage([pageW, pageH]);
-    page.drawText("No job cards to print.", { x: margin, y: pageH - margin - 20, size: 14, font: regular });
+    page.drawText(options.empty ?? "No job cards to print.", { x: margin, y: pageH - margin - 20, size: 14, font: regular });
   }
   return pdf.save();
 }

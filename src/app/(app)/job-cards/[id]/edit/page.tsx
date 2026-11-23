@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requirePage } from "@/lib/auth/guards";
 import { canEditJobCards } from "@/lib/auth/access";
 import { getFieldDefinitions, toFieldDefs } from "@/lib/fields";
+import { jobCardFormOptions } from "@/lib/job-card-form-options";
 import { toIsoDate } from "@/lib/dates";
 import { JobCardForm } from "@/components/job-card-form";
 import { PageHeader } from "@/components/ui";
@@ -11,9 +12,10 @@ import type { ClientField, FieldValues } from "@/components/custom-field-inputs"
 export default async function EditJobCardPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePage(canEditJobCards);
   const { id } = await params;
-  const [card, fields] = await Promise.all([
+  const [card, fields, options] = await Promise.all([
     prisma.jobCard.findUnique({ where: { id }, include: { asset: true, tasks: { orderBy: { line: "asc" } } } }),
     getFieldDefinitions("JOB_CARD"),
+    jobCardFormOptions(user),
   ]);
   if (!card) notFound();
   const reading = (value: { toString(): string } | null) => (value === null ? "" : String(Number(value)));
@@ -26,6 +28,7 @@ export default async function EditJobCardPage({ params }: { params: Promise<{ id
         cardStatus={card.status}
         isAdmin={user.isAdmin}
         fields={toFieldDefs(fields) as ClientField[]}
+        options={options}
         initial={{
           code: card.code,
           assetId: card.assetId ?? "",
@@ -43,6 +46,8 @@ export default async function EditJobCardPage({ params }: { params: Promise<{ id
           project: card.project,
           operatorName: card.operatorName,
           receivedBy: card.receivedBy,
+          receivedById: card.receivedById ?? "",
+          repairType: card.repairType ?? "",
           createdByName: card.createdByName,
           tasks: card.tasks.map((task) => ({ description: task.description, fromDate: toIsoDate(task.fromDate) })),
           customFields: card.customFields as FieldValues,

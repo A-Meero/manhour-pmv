@@ -5,7 +5,10 @@
 
 export const PERMISSIONS = {
   "jobcards.view": { area: "Job cards", label: "View job cards", hint: "Browse job cards, open a card, print its QR" },
-  "jobcards.add": { area: "Job cards", label: "Add job cards", hint: "From a photo of the printed card, typed in, or Excel" },
+  "jobcards.add": { area: "Job cards", label: "Add job cards (photo / PDF, Excel)", hint: "From a photo or PDF of the printed card, or the Excel import" },
+  "jobcards.addTyped": { area: "Job cards", label: "Add job cards by typing", hint: "The \"Type it in\" form" },
+  "jobcards.workshop": { area: "Job cards", label: "Create workshop repair cards", hint: "Needed with one of the two above" },
+  "jobcards.onsite": { area: "Job cards", label: "Create onsite repair cards", hint: "Needed with one of the two above" },
   "jobcards.edit": { area: "Job cards", label: "Edit job card details", hint: "Change the header details and work done lines" },
   "jobcards.close": { area: "Job cards", label: "Close & reopen job cards", hint: "Any job card" },
   "time.scan": { area: "Time", label: "Technician", hint: "Start / stop work on job cards by QR scan (login must be linked to an employee)" },

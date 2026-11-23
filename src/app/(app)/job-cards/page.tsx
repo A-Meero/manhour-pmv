@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { requirePage } from "@/lib/auth/guards";
 import { canAddJobCards, canBrowseJobCards, canEditJobCards } from "@/lib/auth/access";
 import { toIsoDate } from "@/lib/dates";
+import { NEEDS_DOCUMENT_WHERE } from "@/lib/job-card-files";
 import { getFieldDefinitions, toFieldDefs } from "@/lib/fields";
 import { JobCardsManager } from "@/components/job-cards-manager";
 import { PageHeader, Pagination } from "@/components/ui";
@@ -14,11 +15,14 @@ export default async function JobCardsPage({ searchParams }: { searchParams: Pro
   const params = await searchParams;
   const q = params.q?.trim() ?? "";
   const status = params.status ?? "all";
+  const type: "" | "WORKSHOP" | "ONSITE" = params.type === "WORKSHOP" || params.type === "ONSITE" ? params.type : "";
   const page = Math.max(1, Number(params.page) || 1);
   const where = {
     ...(q ? { OR: [{ code: { contains: q, mode: "insensitive" as const } }, { asset: { code: { contains: q, mode: "insensitive" as const } } }] } : {}),
     ...(status === "active" ? { active: true } : status === "inactive" ? { active: false } : {}),
     ...(status === "open" ? { status: "OPEN" as const, active: true } : status === "closed" ? { status: "CLOSED" as const } : {}),
+    ...(status === "nodoc" ? NEEDS_DOCUMENT_WHERE : {}),
+    ...(type ? { repairType: type } : {}),
   };
   const [total, cards, fields] = await Promise.all([
     prisma.jobCard.count({ where }),
@@ -45,7 +49,7 @@ export default async function JobCardsPage({ searchParams }: { searchParams: Pro
         canAdd={canAddJobCards(user)}
         canEdit={canEditJobCards(user)}
         fields={toFieldDefs(fields) as ClientField[]}
-        filters={{ q, status }}
+        filters={{ q, status, type }}
         cards={cards.map((card) => ({
           id: card.id,
           code: card.code,
@@ -58,11 +62,13 @@ export default async function JobCardsPage({ searchParams }: { searchParams: Pro
           asset: card.asset,
           dateIn: card.dateIn ? toIsoDate(card.dateIn) : null,
           jobType: card.jobType,
+          repairType: card.repairType,
+          needsDocument: card.documentRequired && !card.photoPath && card.active,
           inUse: card._count.records + card._count.workSessions + card._count.stockMovements,
           createdAt: card.createdAt.toISOString(),
         }))}
       />
-      <Pagination page={page} pageSize={PAGE_SIZE} total={total} basePath="/job-cards" params={{ q, status }} />
+      <Pagination page={page} pageSize={PAGE_SIZE} total={total} basePath="/job-cards" params={{ q, status, type }} />
     </>
   );
 }

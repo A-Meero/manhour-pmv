@@ -20,8 +20,25 @@ export async function canCloseCard(user: CurrentUser, jobCardId: string) {
   return sessions + records > 0;
 }
 
-/** Closing stops running sessions (adding their time) and blocks new sessions, part issues and non-admin records. */
-export async function setJobCardStatus(user: CurrentUser, jobCardId: string, status: "OPEN" | "CLOSED") {
+/** What still has to be done before a job card is closed (empty = it can be closed). */
+export async function closeBlockers(jobCardId: string): Promise<string[]> {
+  const [card, openRequests, running] = await Promise.all([
+    prisma.jobCard.findUnique({ where: { id: jobCardId }, select: { documentRequired: true, photoPath: true } }),
+    prisma.partRequest.count({ where: { jobCardId, status: { not: "FULFILLED" } } }),
+    prisma.workSession.count({ where: { jobCardId, endedAt: null } }),
+  ]);
+  const blockers: string[] = [];
+  if (card?.documentRequired && !card.photoPath) blockers.push("Its document (created in Oracle) has not been uploaded yet.");
+  if (openRequests) blockers.push(`${openRequests} part request${openRequests > 1 ? "s are" : " is"} not fulfilled yet.`);
+  if (running) blockers.push(`${running} ${running > 1 ? "people are" : "person is"} still working on it (running QR session${running > 1 ? "s" : ""}).`);
+  return blockers;
+}
+
+/**
+ * Closing stops running sessions (adding their time) and blocks new sessions, part issues and non-admin records.
+ * A card with something still to do (closeBlockers) can't be closed, except by an admin who confirms (`force`).
+ */
+export async function setJobCardStatus(user: CurrentUser, jobCardId: string, status: "OPEN" | "CLOSED", force = false) {
   const card = await prisma.jobCard.findUnique({ where: { id: jobCardId } });
   if (!card) throw new HttpError(404, "Job card not found.");
   if (!(await canCloseCard(user, jobCardId))) {
@@ -29,6 +46,14 @@ export async function setJobCardStatus(user: CurrentUser, jobCardId: string, sta
   }
   if (card.status === status) return { stopped: 0 };
   if (status === "OPEN") await assertCanReopen(user, card);
+  const blockers = status === "CLOSED" ? await closeBlockers(jobCardId) : [];
+  if (blockers.length && !(user.isAdmin && force)) {
+    throw new HttpError(
+      409,
+      user.isAdmin ? "This job card still has things to do. Close it anyway?" : "This job card can't be closed yet.",
+      { blockers, canForce: user.isAdmin },
+    );
+  }
   const stopped = await prisma.$transaction(async (tx) => {
     const count = status === "CLOSED" ? await stopAllOnCard(tx, jobCardId, user.id) : 0;
     await tx.jobCard.update({
@@ -37,6 +62,10 @@ export async function setJobCardStatus(user: CurrentUser, jobCardId: string, sta
     });
     return count;
   });
-  await audit(user.id, status === "CLOSED" ? "JOB_CARD_CLOSED" : "JOB_CARD_REOPENED", "JobCard", jobCardId, { code: card.code, stoppedSessions: stopped });
+  await audit(user.id, status === "CLOSED" ? "JOB_CARD_CLOSED" : "JOB_CARD_REOPENED", "JobCard", jobCardId, {
+    code: card.code,
+    stoppedSessions: stopped,
+    ...(blockers.length ? { closedAnywayByAdmin: blockers } : {}),
+  });
   return { stopped };
 }

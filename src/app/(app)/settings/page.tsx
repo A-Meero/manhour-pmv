@@ -30,6 +30,7 @@ export default async function SettingsPage() {
           appBaseUrl: settings.appBaseUrl,
           shiftAlerts: settings.shiftAlerts,
           shiftGraceMinutes: String(settings.shiftGraceMinutes),
+          workshopWords: settings.workshopWords.join(", "),
         }}
         mail={{ label: mail.label, from: mail.from, ready: mail.ready, missing: mail.missing }}
         shifts={shifts.map((shift) => ({

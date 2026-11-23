@@ -6,6 +6,8 @@ import { canManageInventory } from "@/lib/auth/access";
 import { formatDateTime } from "@/lib/dates";
 import { formatMoney, formatQty } from "@/lib/money";
 import { PageHeader } from "@/components/ui";
+import { QrCard } from "@/components/qr-card";
+import { appOrigin, partLink, qrDataUrl } from "@/lib/qr";
 
 const KIND_LABEL = { RECEIVE: "Received", ADJUST: "Adjusted", ISSUE: "Issued", ISSUE_REVERSAL: "Returned" } as const;
 
@@ -21,6 +23,7 @@ export default async function PartHistoryPage({ params }: { params: Promise<{ id
     orderBy: { createdAt: "desc" },
     take: 1000,
   });
+  const qr = await qrDataUrl(partLink(await appOrigin(), part.partNo), 320);
 
   return (
     <>
@@ -29,6 +32,15 @@ export default async function PartHistoryPage({ params }: { params: Promise<{ id
         description={`On hand ${formatQty(Number(part.qtyOnHand))} ${part.unit} · unit cost ${formatMoney(Number(part.unitCost))}`}
         actions={<Link href="/inventory" className="btn">Back to inventory</Link>}
       />
+      <div className="mb-4">
+        <QrCard
+          dataUrl={qr}
+          alt={`QR code for ${part.partNo}`}
+          caption="Stick this on the shelf or bin. Store managers scan it from a job card's page (Add items by QR code) to issue the item to that card."
+          labelHref={`/api/templates/part-labels?ids=${part.id}`}
+          downloadName={`item-${part.partNo}-qr.png`}
+        />
+      </div>
       <div className="table-wrap">
         <table className="table">
           <thead>

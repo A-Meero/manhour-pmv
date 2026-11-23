@@ -12,6 +12,11 @@ import { matchAsset, normalizeIdent, openJobCardOf, readAsset, type AssetBody, t
 import { parseDate, toIsoDate } from "@/lib/dates";
 import { appConfig } from "@/lib/env";
 import { audit } from "@/lib/audit";
+import { canCreateRepairType } from "@/lib/auth/access";
+import { getSettings } from "@/lib/settings";
+import { guessRepairType, parseRepairType, REPAIR_TYPE_LABEL, type RepairTypeValue } from "@/lib/repair-type";
+import { employeesForMatching, matchEmployeeName, matchReceivedBy } from "@/lib/employee-match";
+import { notifyReceivedBy } from "@/lib/notifications";
 
 /**
  * Adding job cards with the printed header of the original card (photo, typed, Excel, API).
@@ -37,6 +42,10 @@ export type JobCardBody = {
   project?: unknown;
   operatorName?: unknown;
   receivedBy?: unknown;
+  /** The employee "Received by" refers to: an id, "" / null for none. Left out → matched from the printed name. */
+  receivedById?: unknown;
+  /** WORKSHOP / ONSITE (also "Workshop", "Onsite") */
+  repairType?: unknown;
   createdByName?: unknown;
   tasks?: TaskInput[];
   photoPath?: unknown;
@@ -71,6 +80,12 @@ export function readHeader(body: JobCardBody, partial = false) {
   for (const key of ["jobType", "repairAt", "project", "operatorName", "receivedBy", "createdByName"] as const) {
     if (has(key)) data[key] = text(body[key]);
   }
+  if (has("repairType")) {
+    const type = parseRepairType(body.repairType);
+    const given = String(body.repairType ?? "").trim();
+    if (given && !type) errors.push("Repair type must be Workshop or Onsite");
+    else data.repairType = type;
+  }
   let tasks: { line: number; description: string; fromDate: Date | null }[] | undefined;
   if (has("tasks")) {
     const list = Array.isArray(body.tasks) ? body.tasks : [];
@@ -91,6 +106,28 @@ async function checkPhoto(value: unknown) {
   const file = await stat(path.join(jobCardPhotoRoot(), relative)).catch(() => null);
   if (!file?.isFile()) throw new HttpError(400, "The photo of the card was not found. Upload it again.");
   return relative;
+}
+
+/**
+ * The received-by employee for a body: undefined = leave as it is (editing), null = none.
+ * Creating without receivedById matches the printed name.
+ */
+async function resolveReceivedBy(body: JobCardBody, creating: boolean): Promise<string | null | undefined> {
+  if (body.receivedById !== undefined) {
+    const id = typeof body.receivedById === "string" ? body.receivedById.trim() : "";
+    if (!id) return null;
+    const employee = await prisma.employee.findUnique({ where: { id }, select: { id: true } });
+    if (!employee) throw new HttpError(400, "The received-by employee was not found.");
+    return employee.id;
+  }
+  if (!creating) return undefined;
+  return (await matchReceivedBy(body.receivedBy))?.id ?? null;
+}
+
+function assertTypeAllowed(user: CurrentUser, type: RepairTypeValue) {
+  if (!canCreateRepairType(user, type)) {
+    throw new HttpError(403, `You are not allowed to create ${REPAIR_TYPE_LABEL[type].toLowerCase()} repair job cards.`);
+  }
 }
 
 export type CardCheck = {
@@ -138,6 +175,7 @@ export async function createJobCard(user: CurrentUser, body: JobCardBody, source
   const { data, tasks, errors } = readHeader(body);
   const custom = validateCustomFields(toFieldDefs(await getFieldDefinitions("JOB_CARD")), body.customFields);
   errors.push(...custom.errors);
+  if (!data.repairType && !errors.some((e) => e.startsWith("Repair type"))) errors.push("Choose the repair type: Workshop or Onsite");
   let newAsset: Prisma.AssetUncheckedCreateInput | null = null;
   if (body.newAsset) {
     const parsed = readAsset(body.newAsset);
@@ -145,6 +183,8 @@ export async function createJobCard(user: CurrentUser, body: JobCardBody, source
     newAsset = parsed.data;
   }
   if (errors.length) throw new HttpError(400, errors.join("; "), errors);
+  assertTypeAllowed(user, data.repairType as RepairTypeValue);
+  const receivedById = await resolveReceivedBy(body, true);
   const photoPath = await checkPhoto(body.photoPath);
   const override = body.allowSecondOpen === true && user.isAdmin;
 
@@ -175,12 +215,16 @@ export async function createJobCard(user: CurrentUser, body: JobCardBody, source
         code,
         ...data,
         assetId,
+        receivedById,
         photoPath,
+        // Typed in: the card is created in Oracle first and its document uploaded here afterwards
+        documentRequired: !photoPath,
         source,
         addedById: user.id,
         customFields: custom.values as Prisma.InputJsonValue,
         tasks: tasks?.length ? { create: tasks } : undefined,
       },
+      include: { asset: { select: { code: true, description: true } } },
     });
   });
   await audit(user.id, "JOB_CARD_CREATED", "JobCard", card.id, {
@@ -188,8 +232,11 @@ export async function createJobCard(user: CurrentUser, body: JobCardBody, source
     assetId: card.assetId,
     newAsset: newAsset?.code,
     photo: !!photoPath,
+    repairType: card.repairType,
+    receivedById,
     ...(override ? { secondOpenCardByAdmin: true } : {}),
   });
+  await notifyReceivedBy(card);
   return card;
 }
 
@@ -212,7 +259,11 @@ export async function updateJobCardDetails(user: CurrentUser, id: string, body: 
     errors.push(...parsed.errors.map((e) => `New asset: ${e}`));
     newAsset = parsed.data;
   }
+  if (data.repairType === null && existing.repairType) errors.push("Choose the repair type: Workshop or Onsite");
   if (errors.length) throw new HttpError(400, errors.join("; "), errors);
+  if (data.repairType && data.repairType !== existing.repairType) assertTypeAllowed(user, data.repairType);
+  if (data.repairType === undefined || data.repairType === existing.repairType) delete data.repairType;
+  const receivedById = await resolveReceivedBy(body, false);
   const override = body.allowSecondOpen === true && user.isAdmin;
 
   await prisma.$transaction(async (tx) => {
@@ -241,6 +292,7 @@ export async function updateJobCardDetails(user: CurrentUser, id: string, body: 
         code,
         ...data,
         assetId,
+        ...(receivedById !== undefined ? { receivedById } : {}),
         ...(body.active !== undefined ? { active: !!body.active } : {}),
         ...(customFields ? { customFields } : {}),
       },
@@ -251,6 +303,10 @@ export async function updateJobCardDetails(user: CurrentUser, id: string, body: 
     }
   });
   await audit(user.id, "JOB_CARD_UPDATED", "JobCard", id, { ...body, tasks: tasks?.length });
+  if (receivedById && receivedById !== existing.receivedById) {
+    const card = await prisma.jobCard.findUniqueOrThrow({ where: { id }, include: { asset: { select: { code: true, description: true } } } });
+    await notifyReceivedBy(card);
+  }
 }
 
 /** Reopening a closed card counts as a new open card for its asset. */
@@ -273,7 +329,15 @@ export type JobCardImportInput = {
   workDone?: unknown;
 } & Omit<JobCardBody, "code" | "tasks" | "assetId" | "newAsset" | "photoPath" | "customFields" | "allowSecondOpen">;
 
-type BatchMeta = { source: DataSource; actorId?: string | null; apiKeyId?: string | null; fileName?: string; isAdmin?: boolean };
+type BatchMeta = {
+  source: DataSource;
+  actorId?: string | null;
+  apiKeyId?: string | null;
+  fileName?: string;
+  isAdmin?: boolean;
+  /** Types the importing user may create; left out (API keys) = no limit, and the type may stay unknown */
+  allowedTypes?: RepairTypeValue[];
+};
 
 /**
  * Creates job cards from Excel / the API. Existing numbers (and repeats) are skipped, never updated.
@@ -289,6 +353,8 @@ export async function importJobCards(items: JobCardImportInput[], meta: BatchMet
   );
   const seen = new Set<string>();
   let created = 0;
+  const { workshopWords } = await getSettings();
+  const employees = items.some((item) => String(item.receivedBy ?? "").trim()) ? await employeesForMatching() : [];
 
   for (const [index, item] of items.entries()) {
     const code = codes[index];
@@ -315,6 +381,13 @@ export async function importJobCards(items: JobCardImportInput[], meta: BatchMet
     const wantsAsset = !!(normalizeCode(item.assetCode) || normalizeIdent(item.plateNo) || normalizeIdent(item.chassisNo));
     const asset = wantsAsset ? await matchAsset({ code: item.assetCode, plate: item.plateNo, chassis: item.chassisNo }) : null;
     if (wantsAsset && !asset) errors.push("Asset not found (add it on the Assets page first)");
+    const repairType = data.repairType ?? guessRepairType(data.repairAt, workshopWords);
+    if (meta.allowedTypes && !errors.some((e) => e.startsWith("Repair type"))) {
+      if (!repairType) errors.push("Repair type is needed: fill in Repair Type (Workshop / Onsite) or Repair At");
+      else if (!meta.allowedTypes.includes(repairType)) errors.push(`You are not allowed to create ${REPAIR_TYPE_LABEL[repairType].toLowerCase()} repair job cards`);
+    }
+    data.repairType = repairType;
+    const receivedBy = matchEmployeeName(data.receivedBy, employees);
     if (errors.length) {
       fail(errors.join("; "));
       continue;
@@ -327,18 +400,20 @@ export async function importJobCards(items: JobCardImportInput[], meta: BatchMet
           const open = await openJobCardOf(asset.id, undefined, tx);
           if (open && !meta.isAdmin) throw new OpenCardError(409, `Asset ${asset.code} already has an open job card (${open.code})`);
         }
-        await tx.jobCard.create({
+        return tx.jobCard.create({
           data: {
             code,
             ...data,
             assetId: asset?.id ?? null,
+            receivedById: receivedBy?.id ?? null,
+            documentRequired: true,
             source: meta.source,
             addedById: meta.actorId ?? null,
             customFields: custom.values as Prisma.InputJsonValue,
             tasks: taskRows?.length ? { create: taskRows } : undefined,
           },
         });
-      });
+      }).then((card) => notifyReceivedBy({ ...card, asset }));
       created += 1;
     } catch (error) {
       if (error instanceof OpenCardError) fail(error.message);
